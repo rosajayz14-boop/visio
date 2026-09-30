@@ -2,11 +2,16 @@ package com.jason.webtv;
 
 import android.app.AlertDialog;
 import android.content.Context;
+import android.content.Intent;
+import android.content.pm.PackageInfo;
 import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Message;
 import android.os.SystemClock;
+import android.provider.Settings;
 import android.text.TextUtils;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -32,8 +37,10 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.FileProvider;
 
 import java.io.ByteArrayInputStream;
+import java.io.File;
 import java.util.List;
 
 /**
@@ -141,6 +148,80 @@ public class MainActivity extends AppCompatActivity {
         bar.setVisibility(View.VISIBLE);
         cursor.setVisibility(View.GONE);
         url.requestFocus();
+
+        checkForUpdate();
+    }
+
+    // ---------------------------------------------------------- Mise à jour auto
+
+    /** Vérifie en arrière-plan s'il existe une version plus récente sur GitHub. */
+    private void checkForUpdate() {
+        new Thread(() -> {
+            final Updater.Release rel = Updater.fetchLatest();
+            if (rel == null) return;
+            String local;
+            try {
+                PackageInfo pi = getPackageManager().getPackageInfo(getPackageName(), 0);
+                local = pi.versionName;
+            } catch (Exception e) {
+                local = "0";
+            }
+            if (!Updater.isNewer(rel.tag, local)) return;
+            runOnUiThread(() -> promptUpdate(rel));
+        }).start();
+    }
+
+    private void promptUpdate(final Updater.Release rel) {
+        if (isFinishing()) return;
+        new AlertDialog.Builder(this)
+                .setTitle("Mise à jour disponible")
+                .setMessage("Une nouvelle version (" + rel.tag + ") est disponible.\n"
+                        + "Voulez-vous l'installer maintenant ?")
+                .setPositiveButton("Installer", (d, w) -> startUpdateDownload(rel))
+                .setNegativeButton("Plus tard", null)
+                .show();
+    }
+
+    private void startUpdateDownload(final Updater.Release rel) {
+        // Sur Android 8+, l'app doit être autorisée à installer des applis.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                && !getPackageManager().canRequestPackageInstalls()) {
+            Toast.makeText(this,
+                    "Autorise WebTV à installer des applications, puis relance la mise à jour",
+                    Toast.LENGTH_LONG).show();
+            try {
+                startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        Uri.parse("package:" + getPackageName())));
+            } catch (Exception ignored) { }
+            return;
+        }
+
+        Toast.makeText(this, "Téléchargement de la mise à jour…", Toast.LENGTH_SHORT).show();
+        final Context app = getApplicationContext();
+        new Thread(() -> {
+            final File apk = Updater.download(app, rel.apkUrl);
+            runOnUiThread(() -> {
+                if (apk == null) {
+                    Toast.makeText(this, "Échec du téléchargement de la mise à jour",
+                            Toast.LENGTH_SHORT).show();
+                } else {
+                    installApk(apk);
+                }
+            });
+        }).start();
+    }
+
+    private void installApk(File apk) {
+        try {
+            Uri uri = FileProvider.getUriForFile(
+                    this, getPackageName() + ".fileprovider", apk);
+            Intent i = new Intent(Intent.ACTION_VIEW);
+            i.setDataAndType(uri, "application/vnd.android.package-archive");
+            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(i);
+        } catch (Exception e) {
+            Toast.makeText(this, "Impossible de lancer l'installation", Toast.LENGTH_SHORT).show();
+        }
     }
 
     // ---------------------------------------------------------------- WebView
@@ -287,8 +368,11 @@ public class MainActivity extends AppCompatActivity {
         if (w == null) return;
         try {
             w.evaluateJavascript(
-                "(function(){try{var m=document.querySelectorAll('video,audio');"
-                + "for(var i=0;i<m.length;i++){try{m[i].pause();}catch(e){}}}catch(e){}})();",
+                "(function(){function c(d){try{var m=d.querySelectorAll('video,audio');"
+                + "for(var i=0;i<m.length;i++){try{m[i].pause();}catch(e){}}"
+                + "var f=d.querySelectorAll('iframe');for(var j=0;j<f.length;j++){"
+                + "try{if(f[j].contentDocument)c(f[j].contentDocument);}catch(e){}}}catch(e){}}"
+                + "c(document);})();",
                 null);
         } catch (Exception ignored) { }
     }
@@ -299,12 +383,23 @@ public class MainActivity extends AppCompatActivity {
                 || code == KeyEvent.KEYCODE_MEDIA_PAUSE;
     }
 
+    // Récupère toutes les vidéos, y compris dans les iframes de même origine
+    // (nombreux lecteurs intégrés), et choisit la vidéo la plus pertinente.
+    private static final String VIDS_JS =
+            "function vids(){var o=[];function c(d){try{var v=d.querySelectorAll('video');"
+            + "for(var i=0;i<v.length;i++)o.push(v[i]);var f=d.querySelectorAll('iframe');"
+            + "for(var j=0;j<f.length;j++){try{if(f[j].contentDocument)c(f[j].contentDocument);}"
+            + "catch(e){}}}catch(e){}}c(document);return o;}"
+            + "function pick(){var a=vids();if(!a.length)return null;var b=a[0];"
+            + "for(var i=0;i<a.length;i++){if(!a[i].paused)return a[i];"
+            + "if((a[i].clientWidth||0)>(b.clientWidth||0))b=a[i];}return b;}";
+
     /** Bascule lecture/pause de la vidéo de la fenêtre active. */
     private void togglePlayPause() {
         WebView w = activeWeb();
         if (w == null) return;
         w.evaluateJavascript(
-            "(function(){var v=document.querySelector('video');"
+            "(function(){" + VIDS_JS + "var v=pick();"
             + "if(v){if(v.paused){v.play();}else{v.pause();}}})();", null);
     }
 
@@ -313,7 +408,7 @@ public class MainActivity extends AppCompatActivity {
         WebView w = activeWeb();
         if (w == null) return;
         w.evaluateJavascript(
-            "(function(){var v=document.querySelector('video');if(v){"
+            "(function(){" + VIDS_JS + "var v=pick();if(v){"
             + "var d=isFinite(v.duration)?v.duration:1e9;"
             + "v.currentTime=Math.min(d,Math.max(0,v.currentTime+(" + seconds + ")));}})();",
             null);

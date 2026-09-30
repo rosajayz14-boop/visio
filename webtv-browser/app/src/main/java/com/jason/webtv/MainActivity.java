@@ -67,7 +67,9 @@ public class MainActivity extends AppCompatActivity {
     private TextView favEmpty;
 
     private volatile boolean adblockEnabled = true;
-    private boolean desktopMode = true;
+    // 0 = Auto (UA système, meilleur pour Cloudflare/connexions), 1 = PC, 2 = Mobile
+    private int uaMode = 0;
+    private String autoUa = null;
     private boolean cursorMode = true;
     private boolean cursorInit = false;
     private float cursorX, cursorY;
@@ -143,7 +145,17 @@ public class MainActivity extends AppCompatActivity {
         s.setAllowFileAccess(true);
         s.setAllowContentAccess(true);
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
-        s.setUserAgentString(desktopMode ? DESKTOP_UA : MOBILE_UA);
+
+        // UA « Auto » : on part du vrai UA de la WebView et on enlève les marqueurs
+        // « wv » et « Version/4.0 » qui trahissent une WebView. Résultat : un UA
+        // Chrome Android cohérent, qui passe beaucoup mieux les protections
+        // Cloudflare et les pages de connexion.
+        autoUa = s.getUserAgentString()
+                .replace("; wv", "")
+                .replaceAll("Version/\\d+\\.\\d+\\s*", "")
+                .replaceAll("\\s+", " ")
+                .trim();
+        s.setUserAgentString(currentUa());
 
         web.setBackgroundColor(Color.BLACK);
         web.setFocusable(true);
@@ -200,8 +212,7 @@ public class MainActivity extends AppCompatActivity {
             public boolean onCreateWindow(WebView view, boolean isDialog,
                                           boolean isUserGesture, Message resultMsg) {
                 final WebView temp = new WebView(MainActivity.this);
-                temp.getSettings().setUserAgentString(
-                        desktopMode ? DESKTOP_UA : MOBILE_UA);
+                temp.getSettings().setUserAgentString(currentUa());
                 temp.setWebViewClient(new WebViewClient() {
                     @Override
                     public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest request) {
@@ -257,6 +268,23 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    /** User-Agent courant selon le mode choisi (Auto / PC / Mobile). */
+    private String currentUa() {
+        switch (uaMode) {
+            case 1: return DESKTOP_UA;
+            case 2: return MOBILE_UA;
+            default: return (autoUa != null && !autoUa.isEmpty()) ? autoUa : MOBILE_UA;
+        }
+    }
+
+    private String uaLabel() {
+        switch (uaMode) {
+            case 1: return "Vue: PC";
+            case 2: return "Vue: Mobile";
+            default: return "Vue: Auto";
+        }
+    }
+
     /** Charge dans la WebView principale l'URL d'un popup, puis jette la WebView temporaire. */
     private void openInMainWindow(String u, WebView temp) {
         if (u != null && (u.startsWith("http://") || u.startsWith("https://"))) {
@@ -303,8 +331,8 @@ public class MainActivity extends AppCompatActivity {
         ((Button) findViewById(R.id.btnFavClose)).setOnClickListener(v -> hideFavorites());
 
         btnUA.setOnClickListener(v -> {
-            desktopMode = !desktopMode;
-            web.getSettings().setUserAgentString(desktopMode ? DESKTOP_UA : MOBILE_UA);
+            uaMode = (uaMode + 1) % 3;   // Auto -> PC -> Mobile -> Auto
+            web.getSettings().setUserAgentString(currentUa());
             updateToggleLabels();
             web.reload();
         });
@@ -327,7 +355,7 @@ public class MainActivity extends AppCompatActivity {
     private void updateToggleLabels() {
         btnCursor.setText(cursorMode ? "Curseur: ON" : "Curseur: OFF");
         btnAd.setText(adblockEnabled ? "Anti-pub: ON" : "Anti-pub: OFF");
-        btnUA.setText(desktopMode ? "Vue: PC" : "Vue: Mobile");
+        btnUA.setText(uaLabel());
     }
 
     // ------------------------------------------------------- Barre d'adresse

@@ -41,7 +41,7 @@
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   }
   a.tile {
-    display: flex; flex-direction: column; justify-content: center;
+    display: flex; flex-direction: row; align-items: center; gap: 14px;
     text-decoration: none; color: #eef3f8;
     background: #14202c; border: 2px solid #24384a; border-radius: 14px;
     padding: 18px 16px; min-height: 96px; text-align: left;
@@ -51,6 +51,9 @@
   a.tile:focus, a.tile:hover {
     border-color: #3d9be9; background: #1b2c3c; transform: scale(1.04);
   }
+  a.tile .ico { width: 44px; height: 44px; flex: 0 0 44px; border-radius: 10px;
+    background: #0f1620; object-fit: contain; }
+  a.tile .txt { min-width: 0; flex: 1; display: flex; flex-direction: column; }
   a.tile .t { font-size: 20px; font-weight: 700; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap; }
   a.tile .u { font-size: 14px; color: #9fb3c4; margin-top: 6px; overflow: hidden;
@@ -127,17 +130,22 @@
 
     section.style.display = 'block';
     data.forEach(function (f) {
+      var h = host(f.url);
       var a = document.createElement('a');
       a.className = 'tile';
       a.href = f.url;
-      a.innerHTML = '<span class="t">' + esc(f.title || host(f.url)) + '</span>' +
-                    '<span class="u">' + esc(host(f.url)) + '</span>';
+      a.innerHTML =
+        '<img class="ico" alt="" src="https://www.google.com/s2/favicons?domain=' +
+          encodeURIComponent(h) + '&sz=64" onerror="this.style.visibility=\'hidden\'">' +
+        '<span class="txt"><span class="t">' + esc(f.title || h) + '</span>' +
+        '<span class="u">' + esc(h) + '</span></span>';
       grid.appendChild(a);
     });
   }
 
   renderFavorites();
-  document.getElementById('q').focus();
+  // Pas de focus automatique sur le champ : sur TV, ça ouvrirait le clavier
+  // tout seul. On clique le champ avec le curseur quand on en a besoin.
 </script>
 </body>
 </html>

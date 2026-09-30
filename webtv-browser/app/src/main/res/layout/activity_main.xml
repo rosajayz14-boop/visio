@@ -57,6 +57,8 @@
             <Button android:id="@+id/btnFwd" style="@style/BarButton" android:text="Suiv." />
             <Button android:id="@+id/btnReload" style="@style/BarButton" android:text="↻" />
             <Button android:id="@+id/btnHome" style="@style/BarButton" android:text="Accueil" />
+            <Button android:id="@+id/btnZoomOut" style="@style/BarButton" android:text="A−" />
+            <Button android:id="@+id/btnZoomIn" style="@style/BarButton" android:text="A+" />
 
             <EditText
                 android:id="@+id/url"

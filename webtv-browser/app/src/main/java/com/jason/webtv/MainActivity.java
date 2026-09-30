@@ -92,6 +92,22 @@ public class MainActivity extends AppCompatActivity {
     private long centerDownAt = 0L;
     private static final long LONG_PRESS_MS = 450L;
 
+    // Réglages mémorisés entre les lancements
+    private static final String PREFS = "webtv_prefs";
+    private static final String K_UA = "ua_mode";
+    private static final String K_POPUPS = "popups";
+    private static final String K_ADBLOCK = "adblock";
+    private static final String K_CURSOR = "cursor";
+
+    // Le curseur se cache tout seul après un moment sans bouger (il ne reste
+    // pas planté au milieu de la vidéo) et réapparaît au premier appui.
+    private static final long CURSOR_HIDE_MS = 3000L;
+    private final Runnable hideCursorRunnable = () -> {
+        if (cursorMode && cursor.getVisibility() == View.VISIBLE) {
+            cursor.setVisibility(View.INVISIBLE);
+        }
+    };
+
     private View customView;
     private WebChromeClient.CustomViewCallback customViewCallback;
 
@@ -125,6 +141,7 @@ public class MainActivity extends AppCompatActivity {
             @Override public void run() { AdBlocker.init(app); }
         }).start();
 
+        loadSettings();
         configureWebView();
         setupButtons();
         updateToggleLabels();
@@ -134,12 +151,40 @@ public class MainActivity extends AppCompatActivity {
 
         web.loadUrl(HOME_URL);
 
-        // Au démarrage, on montre la barre d'adresse prête à recevoir une URL.
-        bar.setVisibility(View.VISIBLE);
-        cursor.setVisibility(View.GONE);
-        url.requestFocus();
+        if (Favorites.list(getApplicationContext()).isEmpty()) {
+            // Premier lancement : barre d'adresse prête à recevoir une URL.
+            bar.setVisibility(View.VISIBLE);
+            cursor.setVisibility(View.GONE);
+            url.requestFocus();
+        } else {
+            // Des favoris existent : on arrive directement sur la grille, curseur
+            // prêt, sans clavier qui s'ouvre tout seul.
+            bar.setVisibility(View.GONE);
+            web.requestFocus();
+            root.post(this::ensureCursorVisible);
+        }
 
         checkForUpdate();
+    }
+
+    // ---------------------------------------------------------------- Réglages
+
+    private void loadSettings() {
+        android.content.SharedPreferences p = getSharedPreferences(PREFS, MODE_PRIVATE);
+        uaMode = p.getInt(K_UA, 0);
+        if (uaMode < 0 || uaMode > 2) uaMode = 0;
+        allowPopups = p.getBoolean(K_POPUPS, false);
+        adblockEnabled = p.getBoolean(K_ADBLOCK, true);
+        cursorMode = p.getBoolean(K_CURSOR, true);
+    }
+
+    private void saveSettings() {
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putInt(K_UA, uaMode)
+                .putBoolean(K_POPUPS, allowPopups)
+                .putBoolean(K_ADBLOCK, adblockEnabled)
+                .putBoolean(K_CURSOR, cursorMode)
+                .apply();
     }
 
     // ---------------------------------------------------------- Mise à jour auto
@@ -533,11 +578,15 @@ public class MainActivity extends AppCompatActivity {
         ((Button) findViewById(R.id.btnHome)).setOnClickListener(v -> web.loadUrl(HOME_URL));
         ((Button) findViewById(R.id.btnExit)).setOnClickListener(v -> finish());
 
+        // Zoom de la page (lisibilité des sites « PC » sur une TV)
+        ((Button) findViewById(R.id.btnZoomOut)).setOnClickListener(v -> web.zoomOut());
+        ((Button) findViewById(R.id.btnZoomIn)).setOnClickListener(v -> web.zoomIn());
+
         btnCursor.setOnClickListener(v -> {
             cursorMode = !cursorMode;
             updateToggleLabels();
+            saveSettings();
             if (cursorMode && bar.getVisibility() != View.VISIBLE) {
-                cursor.setVisibility(View.VISIBLE);
                 ensureCursorVisible();
             } else {
                 cursor.setVisibility(View.GONE);
@@ -547,6 +596,10 @@ public class MainActivity extends AppCompatActivity {
         btnAd.setOnClickListener(v -> {
             adblockEnabled = !adblockEnabled;
             updateToggleLabels();
+            saveSettings();
+            Toast.makeText(this,
+                    adblockEnabled ? "Anti-pub activé" : "Anti-pub désactivé",
+                    Toast.LENGTH_SHORT).show();
             web.reload();
         });
 
@@ -558,12 +611,15 @@ public class MainActivity extends AppCompatActivity {
             uaMode = (uaMode + 1) % 3;   // Auto -> PC -> Mobile -> Auto
             web.getSettings().setUserAgentString(currentUa());
             updateToggleLabels();
+            saveSettings();
+            Toast.makeText(this, uaLabel(), Toast.LENGTH_SHORT).show();
             web.reload();
         });
 
         btnPopup.setOnClickListener(v -> {
             allowPopups = !allowPopups;
             updateToggleLabels();
+            saveSettings();
             Toast.makeText(this,
                     allowPopups ? "Popups autorisés" : "Popups bloqués",
                     Toast.LENGTH_SHORT).show();
@@ -811,7 +867,7 @@ public class MainActivity extends AppCompatActivity {
         exitImmersive();
         if (cursorMode && bar.getVisibility() != View.VISIBLE
                 && !popupVisible()) {
-            cursor.setVisibility(View.VISIBLE);
+            ensureCursorVisible();
         }
     }
 
@@ -968,6 +1024,9 @@ public class MainActivity extends AppCompatActivity {
     private void ensureCursorVisible() {
         if (!cursorMode) return;
         if (cursor.getVisibility() != View.VISIBLE) cursor.setVisibility(View.VISIBLE);
+        // (Re)lance le compte à rebours de masquage automatique.
+        cursor.removeCallbacks(hideCursorRunnable);
+        cursor.postDelayed(hideCursorRunnable, CURSOR_HIDE_MS);
         if (!cursorInit) {
             int w = root.getWidth();
             int h = root.getHeight();
@@ -1011,6 +1070,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void tapAtCursor() {
+        ensureCursorVisible(); // le curseur réapparaît quand on clique
         float x = cursorX + cursor.getWidth() / 2f;
         float y = cursorY + cursor.getHeight() / 2f;
         long t = SystemClock.uptimeMillis();

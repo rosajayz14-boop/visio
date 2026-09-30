@@ -54,6 +54,16 @@ public class MainActivity extends AppCompatActivity {
             "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) "
             + "Chrome/124.0.0.0 Mobile Safari/537.36";
 
+    // Passe automatiquement une vidéo en plein écran quand elle démarre.
+    private static final String AUTO_FS_JS =
+            "(function(){if(window.__wtvfs)return;window.__wtvfs=1;"
+            + "function fs(v){try{(v.requestFullscreen||v.webkitRequestFullscreen"
+            + "||v.webkitEnterFullscreen).call(v);}catch(e){}}"
+            + "document.addEventListener('play',function(e){var v=e.target;"
+            + "if(v&&v.tagName==='VIDEO'&&!document.fullscreenElement"
+            + "&&!document.webkitFullscreenElement&&(v.clientWidth||0)>=280){"
+            + "setTimeout(function(){fs(v);},60);}},true);})();";
+
     private FrameLayout root;
     private WebView web;
     private ImageView cursor;
@@ -204,6 +214,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onPageFinished(WebView view, String u) {
                 if (u != null) url.setText(u);
+                view.evaluateJavascript(AUTO_FS_JS, null);
             }
         });
 
@@ -280,6 +291,32 @@ public class MainActivity extends AppCompatActivity {
                 + "for(var i=0;i<m.length;i++){try{m[i].pause();}catch(e){}}}catch(e){}})();",
                 null);
         } catch (Exception ignored) { }
+    }
+
+    private boolean isPlayPauseKey(int code) {
+        return code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
+                || code == KeyEvent.KEYCODE_MEDIA_PLAY
+                || code == KeyEvent.KEYCODE_MEDIA_PAUSE;
+    }
+
+    /** Bascule lecture/pause de la vidéo de la fenêtre active. */
+    private void togglePlayPause() {
+        WebView w = activeWeb();
+        if (w == null) return;
+        w.evaluateJavascript(
+            "(function(){var v=document.querySelector('video');"
+            + "if(v){if(v.paused){v.play();}else{v.pause();}}})();", null);
+    }
+
+    /** Avance (+) ou recule (−) la vidéo de la fenêtre active de X secondes. */
+    private void seekBy(int seconds) {
+        WebView w = activeWeb();
+        if (w == null) return;
+        w.evaluateJavascript(
+            "(function(){var v=document.querySelector('video');if(v){"
+            + "var d=isFinite(v.duration)?v.duration:1e9;"
+            + "v.currentTime=Math.min(d,Math.max(0,v.currentTime+(" + seconds + ")));}})();",
+            null);
     }
 
     /** User-Agent courant selon le mode choisi (Auto / PC / Mobile). */
@@ -385,6 +422,11 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView v, String u) {
                 return handleOverride(u);
+            }
+
+            @Override
+            public void onPageFinished(WebView v, String u) {
+                v.evaluateJavascript(AUTO_FS_JS, null);
             }
         });
 
@@ -738,6 +780,45 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
         int code = e.getKeyCode();
+
+        // Touches média de la manette : Play/Pause -> lecture/pause de la vidéo,
+        // Avance/Retour rapide -> +/- 10 s. Fonctionne partout.
+        if (isPlayPauseKey(code)) {
+            if (e.getAction() == KeyEvent.ACTION_UP) togglePlayPause();
+            return true;
+        }
+        if (code == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD) {
+            if (e.getAction() == KeyEvent.ACTION_DOWN) seekBy(10);
+            return true;
+        }
+        if (code == KeyEvent.KEYCODE_MEDIA_REWIND) {
+            if (e.getAction() == KeyEvent.ACTION_DOWN) seekBy(-10);
+            return true;
+        }
+
+        // Plein écran vidéo : gauche/droite = reculer/avancer (10 s),
+        // OK = lecture/pause, Retour = quitter le plein écran.
+        if (customView != null) {
+            if (code == KeyEvent.KEYCODE_DPAD_LEFT) {
+                if (e.getAction() == KeyEvent.ACTION_DOWN) seekBy(-10);
+                return true;
+            }
+            if (code == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                if (e.getAction() == KeyEvent.ACTION_DOWN) seekBy(10);
+                return true;
+            }
+            if (code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER
+                    || code == KeyEvent.KEYCODE_NUMPAD_ENTER
+                    || code == KeyEvent.KEYCODE_BUTTON_A) {
+                if (e.getAction() == KeyEvent.ACTION_UP) togglePlayPause();
+                return true;
+            }
+            if (code == KeyEvent.KEYCODE_BACK) {
+                if (e.getAction() == KeyEvent.ACTION_UP) hideFullscreen();
+                return true;
+            }
+            return super.dispatchKeyEvent(e);
+        }
 
         // Panneau des favoris ouvert : Retour ferme, MENU ignoré, le reste
         // laisse la navigation D-pad native entre les éléments.

@@ -1,0 +1,39 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.jason.webtv'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.jason.webtv"
+        minSdk 21          // couvre les vieux Fire Stick (Fire OS 5 / Android 5.1)
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        debug {
+            // APK debug : signé automatiquement avec la clé debug -> installable direct
+            applicationIdSuffix ""
+        }
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    // Aligne toutes les variantes de kotlin-stdlib (jdk7/jdk8) sur la même version
+    // pour éviter l'erreur "Duplicate class kotlin.*" tirée par androidx.appcompat.
+    implementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.22')
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+}

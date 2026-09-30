@@ -1,0 +1,4 @@
+// Racine du projet — plugins déclarés ici, appliqués dans app/build.gradle
+plugins {
+    id 'com.android.application' version '8.6.1' apply false
+}

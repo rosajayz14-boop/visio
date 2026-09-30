@@ -7,8 +7,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Décompresser le projet
-        run: unzip -o WebTV-android-tv-projet.zip
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

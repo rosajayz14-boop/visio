@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebTV</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: radial-gradient(1200px 600px at 50% -10%, #16324a 0%, #0b0f14 60%);
+    color: #eef3f8;
+    font-family: Roboto, "Segoe UI", Arial, sans-serif;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    text-align: center; padding: 4vh 5vw;
+  }
+  .logo { font-size: 8vw; font-weight: 800; letter-spacing: 1px; }
+  .logo .tv { color: #3d9be9; }
+  .tag { color: #7fc4e6; font-size: 2.4vw; margin-top: 0.5vh; }
+  form { margin-top: 5vh; width: min(80vw, 900px); display: flex; gap: 12px; }
+  input {
+    flex: 1; font-size: 2.6vw; padding: 1.6vh 2vw;
+    border-radius: 12px; border: 2px solid #2c4457;
+    background: #0f1620; color: #fff; outline: none;
+  }
+  input:focus { border-color: #3d9be9; }
+  button {
+    font-size: 2.6vw; padding: 1.6vh 3vw; border: 0; border-radius: 12px;
+    background: #3d9be9; color: #06121c; font-weight: 700; cursor: pointer;
+  }
+  .tips {
+    margin-top: 6vh; color: #9fb3c4; font-size: 1.9vw; line-height: 1.9;
+    max-width: 900px;
+  }
+  .tips b { color: #eef3f8; }
+  .kbd {
+    display: inline-block; background: #1a2733;
+    border: 1px solid #334656; border-radius: 6px; padding: 0 8px; color: #cfe3f2;
+  }
+</style>
+</head>
+<body>
+  <div class="logo">Web<span class="tv">TV</span></div>
+  <div class="tag">Navigateur • Sans pub</div>
+
+  <form onsubmit="go(); return false;">
+    <input id="q" type="text" placeholder="Adresse web ou recherche…" autocomplete="off" />
+    <button type="submit">Aller</button>
+  </form>
+
+  <div class="tips">
+    <div><span class="kbd">MENU</span> ouvre la barre d'adresse &nbsp;•&nbsp; <span class="kbd">OK</span> clique</div>
+    <div><span class="kbd">Croix directionnelle</span> déplace le curseur &nbsp;•&nbsp; <span class="kbd">Retour</span> x2 pour quitter</div>
+  </div>
+
+<script>
+  function go() {
+    var v = (document.getElementById('q').value || '').trim();
+    if (!v) return;
+    if (/^https?:\/\//i.test(v)) { location.href = v; }
+    else if (v.indexOf(' ') < 0 && v.indexOf('.') > 0) { location.href = 'https://' + v; }
+    else { location.href = 'https://www.google.com/search?q=' + encodeURIComponent(v); }
+  }
+  document.getElementById('q').focus();
+</script>
+</body>
+</html>

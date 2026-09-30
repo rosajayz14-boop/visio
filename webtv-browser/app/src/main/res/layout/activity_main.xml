@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black">
+
+    <WebView
+        android:id="@+id/web"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <ImageView
+        android:id="@+id/cursor"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:src="@drawable/cursor"
+        android:visibility="gone"
+        android:contentDescription="@null" />
+
+    <ProgressBar
+        android:id="@+id/progress"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="4dp"
+        android:layout_gravity="top"
+        android:max="100"
+        android:progressTint="@color/accent"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:orientation="horizontal"
+        android:background="@color/bar_bg"
+        android:padding="6dp"
+        android:gravity="center_vertical"
+        android:visibility="gone">
+
+        <Button android:id="@+id/btnBack" style="@style/BarButton" android:text="Préc." />
+        <Button android:id="@+id/btnFwd" style="@style/BarButton" android:text="Suiv." />
+        <Button android:id="@+id/btnReload" style="@style/BarButton" android:text="Recharger" />
+        <Button android:id="@+id/btnHome" style="@style/BarButton" android:text="Accueil" />
+
+        <EditText
+            android:id="@+id/url"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginEnd="4dp"
+            android:background="@drawable/url_bg"
+            android:hint="@string/hint_url"
+            android:textColor="#FFFFFFFF"
+            android:textColorHint="#88FFFFFF"
+            android:paddingLeft="12dp"
+            android:paddingRight="12dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp"
+            android:singleLine="true"
+            android:imeOptions="actionGo"
+            android:inputType="textUri"
+            android:textSize="15sp" />
+
+        <Button android:id="@+id/btnCursor" style="@style/BarButton" android:text="Curseur: ON" />
+        <Button android:id="@+id/btnAd" style="@style/BarButton" android:text="Anti-pub: ON" />
+        <Button android:id="@+id/btnExit" style="@style/BarButton" android:text="Quitter" />
+    </LinearLayout>
+
+</FrameLayout>

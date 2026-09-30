@@ -41,7 +41,7 @@
 
         <Button android:id="@+id/btnBack" style="@style/BarButton" android:text="Préc." />
         <Button android:id="@+id/btnFwd" style="@style/BarButton" android:text="Suiv." />
-        <Button android:id="@+id/btnReload" style="@style/BarButton" android:text="Recharger" />
+        <Button android:id="@+id/btnReload" style="@style/BarButton" android:text="↻" />
         <Button android:id="@+id/btnHome" style="@style/BarButton" android:text="Accueil" />
 
         <EditText
@@ -63,9 +63,71 @@
             android:inputType="textUri"
             android:textSize="15sp" />
 
+        <Button android:id="@+id/btnAddFav" style="@style/BarButton" android:text="☆ Ajouter" />
+        <Button android:id="@+id/btnFav" style="@style/BarButton" android:text="★ Favoris" />
         <Button android:id="@+id/btnCursor" style="@style/BarButton" android:text="Curseur: ON" />
         <Button android:id="@+id/btnAd" style="@style/BarButton" android:text="Anti-pub: ON" />
         <Button android:id="@+id/btnExit" style="@style/BarButton" android:text="Quitter" />
+    </LinearLayout>
+
+    <!-- Panneau des favoris (superposé, navigable à la télécommande) -->
+    <LinearLayout
+        android:id="@+id/favOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:background="#D9000000"
+        android:padding="24dp"
+        android:visibility="gone"
+        android:clickable="true"
+        android:focusable="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="14dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="★ Mes favoris"
+                android:textColor="#FFFFFFFF"
+                android:textSize="26sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btnFavClose"
+                style="@style/BarButton"
+                android:text="Fermer ✕" />
+        </LinearLayout>
+
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:scrollbars="vertical">
+
+            <LinearLayout
+                android:id="@+id/favList"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+        </ScrollView>
+
+        <TextView
+            android:id="@+id/favEmpty"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Aucun favori pour l'instant.\nOuvrez un site puis appuyez sur « ☆ Ajouter »."
+            android:textColor="#B0C4D4"
+            android:textSize="18sp"
+            android:gravity="center"
+            android:paddingTop="40dp"
+            android:visibility="gone" />
     </LinearLayout>
 
 </FrameLayout>

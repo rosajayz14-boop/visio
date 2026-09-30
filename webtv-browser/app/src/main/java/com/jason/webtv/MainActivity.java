@@ -1,10 +1,12 @@
 package com.jason.webtv;
 
+import android.app.AlertDialog;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.os.SystemClock;
+import android.text.TextUtils;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
@@ -12,6 +14,7 @@ import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
@@ -24,11 +27,13 @@ import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 
 import java.io.ByteArrayInputStream;
+import java.util.List;
 
 /**
  * Navigateur web plein écran pour Android TV / Fire TV / Google TV Streamer 4K.
@@ -50,7 +55,11 @@ public class MainActivity extends AppCompatActivity {
     private ProgressBar progress;
     private LinearLayout bar;
     private EditText url;
-    private Button btnCursor, btnAd;
+    private Button btnCursor, btnAd, btnAddFav, btnFav;
+
+    private LinearLayout favOverlay;
+    private LinearLayout favList;
+    private TextView favEmpty;
 
     private volatile boolean adblockEnabled = true;
     private boolean cursorMode = true;
@@ -75,6 +84,11 @@ public class MainActivity extends AppCompatActivity {
         url = findViewById(R.id.url);
         btnCursor = findViewById(R.id.btnCursor);
         btnAd = findViewById(R.id.btnAd);
+        btnAddFav = findViewById(R.id.btnAddFav);
+        btnFav = findViewById(R.id.btnFav);
+        favOverlay = findViewById(R.id.favOverlay);
+        favList = findViewById(R.id.favList);
+        favEmpty = findViewById(R.id.favEmpty);
 
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
@@ -123,6 +137,9 @@ public class MainActivity extends AppCompatActivity {
         web.setBackgroundColor(Color.BLACK);
         web.setFocusable(true);
         web.setFocusableInTouchMode(true);
+
+        // Pont pour que la page d'accueil (home.html) affiche les favoris.
+        web.addJavascriptInterface(new FavBridge(), "AndroidFav");
 
         web.setWebViewClient(new WebViewClient() {
             @Override
@@ -228,6 +245,10 @@ public class MainActivity extends AppCompatActivity {
             web.reload();
         });
 
+        btnAddFav.setOnClickListener(v -> addCurrentToFavorites());
+        btnFav.setOnClickListener(v -> showFavorites());
+        ((Button) findViewById(R.id.btnFavClose)).setOnClickListener(v -> hideFavorites());
+
         url.setOnEditorActionListener((v, actionId, event) -> {
             boolean go = actionId == EditorInfo.IME_ACTION_GO
                     || actionId == EditorInfo.IME_ACTION_DONE
@@ -272,6 +293,158 @@ public class MainActivity extends AppCompatActivity {
         if (cursorMode) {
             cursor.setVisibility(View.VISIBLE);
             ensureCursorVisible();
+        }
+    }
+
+    // ------------------------------------------------------------- Favoris
+
+    /** Ajoute la page courante aux favoris (nom modifiable via une boîte de dialogue). */
+    private void addCurrentToFavorites() {
+        final String current = web.getUrl();
+        if (current == null
+                || !(current.startsWith("http://") || current.startsWith("https://"))) {
+            Toast.makeText(this, "Ouvrez d'abord un site web à ajouter", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String pageTitle = web.getTitle();
+        if (TextUtils.isEmpty(pageTitle)) pageTitle = current;
+
+        final EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setText(pageTitle);
+        input.setSelectAllOnFocus(true);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Ajouter aux favoris")
+                .setMessage(current)
+                .setView(input)
+                .setPositiveButton("Enregistrer", (d, w) -> {
+                    String name = input.getText().toString().trim();
+                    boolean ok = Favorites.add(getApplicationContext(), name, current);
+                    Toast.makeText(this,
+                            ok ? "Ajouté aux favoris" : "Impossible d'ajouter ce site",
+                            Toast.LENGTH_SHORT).show();
+                    refreshHomeIfShown();
+                })
+                .setNegativeButton("Annuler", null)
+                .show();
+    }
+
+    /** Affiche le panneau des favoris et construit la liste. */
+    private void showFavorites() {
+        if (bar.getVisibility() == View.VISIBLE) hideBar();
+        cursor.setVisibility(View.GONE);
+        // Empêche le focus D-pad de s'échapper vers la page derrière le panneau.
+        web.setFocusable(false);
+        web.setFocusableInTouchMode(false);
+        buildFavoritesList();
+        favOverlay.setVisibility(View.VISIBLE);
+
+        // Donne le focus au premier élément (ou au bouton Fermer si vide).
+        View first = favList.getChildCount() > 0 ? favList.getChildAt(0) : null;
+        final View target = first != null ? first.findViewById(R.id.favOpen) : findViewById(R.id.btnFavClose);
+        if (target != null) target.post(target::requestFocus);
+    }
+
+    private void hideFavorites() {
+        favOverlay.setVisibility(View.GONE);
+        web.setFocusable(true);
+        web.setFocusableInTouchMode(true);
+        web.requestFocus();
+        if (cursorMode && bar.getVisibility() != View.VISIBLE) {
+            cursor.setVisibility(View.VISIBLE);
+            ensureCursorVisible();
+        }
+    }
+
+    private boolean favoritesVisible() {
+        return favOverlay != null && favOverlay.getVisibility() == View.VISIBLE;
+    }
+
+    private void buildFavoritesList() {
+        favList.removeAllViews();
+        List<Favorites.Item> items = Favorites.list(getApplicationContext());
+
+        if (items.isEmpty()) {
+            favEmpty.setVisibility(View.VISIBLE);
+            return;
+        }
+        favEmpty.setVisibility(View.GONE);
+
+        for (final Favorites.Item item : items) {
+            LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            rowLp.bottomMargin = dp(8);
+
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setLayoutParams(rowLp);
+
+            Button open = new Button(this, null);
+            open.setId(R.id.favOpen);
+            open.setText(item.title + "\n" + item.url);
+            open.setTextColor(Color.WHITE);
+            open.setAllCaps(false);
+            open.setBackgroundResource(R.drawable.btn_bg);
+            open.setPadding(dp(18), dp(10), dp(18), dp(10));
+            open.setFocusable(true);
+            LinearLayout.LayoutParams openLp = new LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+            openLp.rightMargin = dp(8);
+            open.setLayoutParams(openLp);
+            open.setOnClickListener(v -> {
+                hideFavorites();
+                navigateTo(item.url);
+            });
+
+            Button del = new Button(this, null);
+            del.setText("Supprimer");
+            del.setTextColor(Color.WHITE);
+            del.setAllCaps(false);
+            del.setBackgroundResource(R.drawable.btn_bg);
+            del.setPadding(dp(16), dp(10), dp(16), dp(10));
+            del.setFocusable(true);
+            del.setLayoutParams(new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.MATCH_PARENT));
+            del.setOnClickListener(v -> {
+                Favorites.remove(getApplicationContext(), item.url);
+                buildFavoritesList();
+                refreshHomeIfShown();
+                View next = favList.getChildCount() > 0
+                        ? favList.getChildAt(0).findViewById(R.id.favOpen)
+                        : findViewById(R.id.btnFavClose);
+                if (next != null) next.post(next::requestFocus);
+            });
+
+            row.addView(open);
+            row.addView(del);
+            favList.addView(row);
+        }
+    }
+
+    private int dp(int v) {
+        return Math.round(getResources().getDisplayMetrics().density * v);
+    }
+
+    private void refreshHomeIfShown() {
+        String u = web.getUrl();
+        if (u != null && u.startsWith("file:///android_asset/home.html")) {
+            web.reload();
+        }
+    }
+
+    /** Pont JavaScript : la page d'accueil lit les favoris et peut en supprimer. */
+    private final class FavBridge {
+        @JavascriptInterface
+        public String list() {
+            return Favorites.toJson(getApplicationContext());
+        }
+
+        @JavascriptInterface
+        public void remove(final String favUrl) {
+            Favorites.remove(getApplicationContext(), favUrl);
         }
     }
 
@@ -327,6 +500,17 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
         int code = e.getKeyCode();
+
+        // Panneau des favoris ouvert : Retour ferme, MENU ignoré, le reste
+        // laisse la navigation D-pad native entre les éléments.
+        if (favoritesVisible()) {
+            if (code == KeyEvent.KEYCODE_BACK) {
+                if (e.getAction() == KeyEvent.ACTION_UP) hideFavorites();
+                return true;
+            }
+            if (code == KeyEvent.KEYCODE_MENU) return true;
+            return super.dispatchKeyEvent(e);
+        }
 
         // Touche MENU : afficher/cacher la barre d'adresse
         if (code == KeyEvent.KEYCODE_MENU) {

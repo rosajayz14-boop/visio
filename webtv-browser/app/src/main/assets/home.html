@@ -6,32 +6,59 @@
 <title>WebTV</title>
 <style>
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; }
+  html, body { margin: 0; min-height: 100%; }
   body {
     background: radial-gradient(1200px 600px at 50% -10%, #16324a 0%, #0b0f14 60%);
     color: #eef3f8;
     font-family: Roboto, "Segoe UI", Arial, sans-serif;
     display: flex; flex-direction: column;
-    align-items: center; justify-content: center;
-    text-align: center; padding: 4vh 5vw;
+    align-items: center;
+    text-align: center; padding: 4vh 5vw 8vh;
   }
-  .logo { font-size: 8vw; font-weight: 800; letter-spacing: 1px; }
+  .logo { font-size: 7vw; font-weight: 800; letter-spacing: 1px; margin-top: 2vh; }
   .logo .tv { color: #3d9be9; }
-  .tag { color: #7fc4e6; font-size: 2.4vw; margin-top: 0.5vh; }
-  form { margin-top: 5vh; width: min(80vw, 900px); display: flex; gap: 12px; }
+  .tag { color: #7fc4e6; font-size: 2.2vw; margin-top: 0.5vh; }
+  form { margin-top: 4vh; width: min(80vw, 900px); display: flex; gap: 12px; }
   input {
-    flex: 1; font-size: 2.6vw; padding: 1.6vh 2vw;
+    flex: 1; font-size: 2.4vw; padding: 1.6vh 2vw;
     border-radius: 12px; border: 2px solid #2c4457;
     background: #0f1620; color: #fff; outline: none;
   }
   input:focus { border-color: #3d9be9; }
-  button {
-    font-size: 2.6vw; padding: 1.6vh 3vw; border: 0; border-radius: 12px;
+  .goBtn {
+    font-size: 2.4vw; padding: 1.6vh 3vw; border: 0; border-radius: 12px;
     background: #3d9be9; color: #06121c; font-weight: 700; cursor: pointer;
   }
+
+  .favSection { margin-top: 5vh; width: min(92vw, 1400px); }
+  .favHead {
+    display: flex; align-items: center; justify-content: space-between;
+    color: #cfe3f2; font-size: 2vw; margin-bottom: 2vh;
+  }
+  .favHead .star { color: #ffcf4d; }
+  .grid {
+    display: grid; gap: 18px;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  }
+  a.tile {
+    display: flex; flex-direction: column; justify-content: center;
+    text-decoration: none; color: #eef3f8;
+    background: #14202c; border: 2px solid #24384a; border-radius: 14px;
+    padding: 18px 16px; min-height: 96px; text-align: left;
+    transition: transform .08s ease, border-color .08s ease, background .08s ease;
+    outline: none;
+  }
+  a.tile:focus, a.tile:hover {
+    border-color: #3d9be9; background: #1b2c3c; transform: scale(1.04);
+  }
+  a.tile .t { font-size: 20px; font-weight: 700; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  a.tile .u { font-size: 14px; color: #9fb3c4; margin-top: 6px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+
   .tips {
-    margin-top: 6vh; color: #9fb3c4; font-size: 1.9vw; line-height: 1.9;
-    max-width: 900px;
+    margin-top: 5vh; color: #9fb3c4; font-size: 1.7vw; line-height: 1.9;
+    max-width: 1000px;
   }
   .tips b { color: #eef3f8; }
   .kbd {
@@ -46,12 +73,20 @@
 
   <form onsubmit="go(); return false;">
     <input id="q" type="text" placeholder="Adresse web ou recherche…" autocomplete="off" />
-    <button type="submit">Aller</button>
+    <button type="submit" class="goBtn">Aller</button>
   </form>
 
+  <div id="favSection" class="favSection" style="display:none;">
+    <div class="favHead">
+      <span><span class="star">★</span>&nbsp; Mes favoris</span>
+      <span style="font-size:1.4vw;color:#8aa1b4;">OK pour ouvrir</span>
+    </div>
+    <div id="grid" class="grid"></div>
+  </div>
+
   <div class="tips">
-    <div><span class="kbd">MENU</span> ouvre la barre d'adresse &nbsp;•&nbsp; <span class="kbd">OK</span> clique</div>
-    <div><span class="kbd">Croix directionnelle</span> déplace le curseur &nbsp;•&nbsp; <span class="kbd">Retour</span> x2 pour quitter</div>
+    <div><span class="kbd">MENU</span> ouvre la barre &nbsp;•&nbsp; <span class="kbd">☆ Ajouter</span> met la page en favori &nbsp;•&nbsp; <span class="kbd">★ Favoris</span> ouvre la liste</div>
+    <div><span class="kbd">Croix directionnelle</span> déplace le curseur &nbsp;•&nbsp; <span class="kbd">OK</span> clique &nbsp;•&nbsp; <span class="kbd">Retour</span> x2 pour quitter</div>
   </div>
 
 <script>
@@ -62,6 +97,41 @@
     else if (v.indexOf(' ') < 0 && v.indexOf('.') > 0) { location.href = 'https://' + v; }
     else { location.href = 'https://www.google.com/search?q=' + encodeURIComponent(v); }
   }
+
+  function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function host(u) {
+    try { return new URL(u).hostname.replace(/^www\./, ''); } catch (e) { return u; }
+  }
+
+  function renderFavorites() {
+    var data = [];
+    try {
+      if (window.AndroidFav && AndroidFav.list) {
+        data = JSON.parse(AndroidFav.list() || '[]');
+      }
+    } catch (e) { data = []; }
+
+    var section = document.getElementById('favSection');
+    var grid = document.getElementById('grid');
+    grid.innerHTML = '';
+    if (!data.length) { section.style.display = 'none'; return; }
+
+    section.style.display = 'block';
+    data.forEach(function (f) {
+      var a = document.createElement('a');
+      a.className = 'tile';
+      a.href = f.url;
+      a.innerHTML = '<span class="t">' + esc(f.title || host(f.url)) + '</span>' +
+                    '<span class="u">' + esc(host(f.url)) + '</span>';
+      grid.appendChild(a);
+    });
+  }
+
+  renderFavorites();
   document.getElementById('q').focus();
 </script>
 </body>

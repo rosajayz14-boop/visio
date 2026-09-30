@@ -73,6 +73,8 @@ public class MainActivity extends AppCompatActivity {
     private float cursorX, cursorY;
     private final int baseStep = 28;
     private long lastBack = 0L;
+    private long centerDownAt = 0L;
+    private static final long LONG_PRESS_MS = 450L;
 
     private View customView;
     private WebChromeClient.CustomViewCallback customViewCallback;
@@ -631,7 +633,15 @@ public class MainActivity extends AppCompatActivity {
                 || code == KeyEvent.KEYCODE_BUTTON_A;
 
         if (isCenter) {
-            if (e.getAction() == KeyEvent.ACTION_UP) tapAtCursor();
+            // Appui COURT = clic ; appui LONG = ouvrir la barre (utile sur les
+            // télécommandes Google TV qui n'ont pas de touche MENU).
+            if (e.getAction() == KeyEvent.ACTION_DOWN) {
+                if (e.getRepeatCount() == 0) centerDownAt = e.getEventTime();
+            } else if (e.getAction() == KeyEvent.ACTION_UP) {
+                long dur = e.getEventTime() - centerDownAt;
+                if (dur >= LONG_PRESS_MS) toggleBar();
+                else tapAtCursor();
+            }
             return true;
         }
         if (isDir) {

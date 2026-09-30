@@ -10,8 +10,8 @@ android {
         applicationId "com.jason.webtv"
         minSdk 21          // couvre les vieux Fire Stick (Fire OS 5 / Android 5.1)
         targetSdk 34
-        versionCode 2
-        versionName "2.0"
+        versionCode 3
+        versionName "2.1"
     }
 
     buildTypes {

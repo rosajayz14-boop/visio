@@ -60,13 +60,17 @@ public class MainActivity extends AppCompatActivity {
     private ProgressBar progress;
     private View bar;
     private EditText url;
-    private Button btnCursor, btnAd, btnAddFav, btnFav, btnUA;
+    private Button btnCursor, btnAd, btnAddFav, btnFav, btnUA, btnPopup;
 
     private LinearLayout favOverlay;
     private LinearLayout favList;
     private TextView favEmpty;
 
     private volatile boolean adblockEnabled = true;
+    // Popups bloqués par défaut : indispensable pour les sites de streaming qui
+    // ouvrent une pub au clic sur « Play ». Une fois le popup bloqué, la vidéo
+    // se lance en place. Activable si un site met vraiment son lecteur en popup.
+    private boolean allowPopups = false;
     // 0 = Auto (UA système, meilleur pour Cloudflare/connexions), 1 = PC, 2 = Mobile
     private int uaMode = 0;
     private String autoUa = null;
@@ -97,6 +101,7 @@ public class MainActivity extends AppCompatActivity {
         btnAddFav = findViewById(R.id.btnAddFav);
         btnFav = findViewById(R.id.btnFav);
         btnUA = findViewById(R.id.btnUA);
+        btnPopup = findViewById(R.id.btnPopup);
         favOverlay = findViewById(R.id.favOverlay);
         favList = findViewById(R.id.favList);
         favEmpty = findViewById(R.id.favEmpty);
@@ -211,6 +216,11 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public boolean onCreateWindow(WebView view, boolean isDialog,
                                           boolean isUserGesture, Message resultMsg) {
+                // Popups bloqués : on n'ouvre rien -> la vidéo se joue en place
+                // sur les sites de streaming à pub.
+                if (!allowPopups) {
+                    return false;
+                }
                 final WebView temp = new WebView(MainActivity.this);
                 temp.getSettings().setUserAgentString(currentUa());
                 temp.setWebViewClient(new WebViewClient() {
@@ -337,6 +347,14 @@ public class MainActivity extends AppCompatActivity {
             web.reload();
         });
 
+        btnPopup.setOnClickListener(v -> {
+            allowPopups = !allowPopups;
+            updateToggleLabels();
+            Toast.makeText(this,
+                    allowPopups ? "Popups autorisés" : "Popups bloqués",
+                    Toast.LENGTH_SHORT).show();
+        });
+
         url.setOnEditorActionListener((v, actionId, event) -> {
             boolean go = actionId == EditorInfo.IME_ACTION_GO
                     || actionId == EditorInfo.IME_ACTION_DONE
@@ -356,6 +374,7 @@ public class MainActivity extends AppCompatActivity {
         btnCursor.setText(cursorMode ? "Curseur: ON" : "Curseur: OFF");
         btnAd.setText(adblockEnabled ? "Anti-pub: ON" : "Anti-pub: OFF");
         btnUA.setText(uaLabel());
+        btnPopup.setText(allowPopups ? "Popups: ON" : "Popups: OFF");
     }
 
     // ------------------------------------------------------- Barre d'adresse

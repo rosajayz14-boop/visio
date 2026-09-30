@@ -70,7 +70,8 @@
 
             <Button android:id="@+id/btnAddFav" style="@style/BarButton" android:text="☆ Ajouter" />
             <Button android:id="@+id/btnFav" style="@style/BarButton" android:text="★ Favoris" />
-            <Button android:id="@+id/btnUA" style="@style/BarButton" android:text="Vue: PC" />
+            <Button android:id="@+id/btnUA" style="@style/BarButton" android:text="Vue: Auto" />
+            <Button android:id="@+id/btnPopup" style="@style/BarButton" android:text="Popups: OFF" />
             <Button android:id="@+id/btnCursor" style="@style/BarButton" android:text="Curseur: ON" />
             <Button android:id="@+id/btnAd" style="@style/BarButton" android:text="Anti-pub: ON" />
             <Button android:id="@+id/btnExit" style="@style/BarButton" android:text="Quitter" />

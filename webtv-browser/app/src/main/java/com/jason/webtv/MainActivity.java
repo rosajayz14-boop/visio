@@ -61,16 +61,6 @@ public class MainActivity extends AppCompatActivity {
             "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) "
             + "Chrome/124.0.0.0 Mobile Safari/537.36";
 
-    // Passe automatiquement une vidéo en plein écran quand elle démarre.
-    private static final String AUTO_FS_JS =
-            "(function(){if(window.__wtvfs)return;window.__wtvfs=1;"
-            + "function fs(v){try{(v.requestFullscreen||v.webkitRequestFullscreen"
-            + "||v.webkitEnterFullscreen).call(v);}catch(e){}}"
-            + "document.addEventListener('play',function(e){var v=e.target;"
-            + "if(v&&v.tagName==='VIDEO'&&!document.fullscreenElement"
-            + "&&!document.webkitFullscreenElement&&(v.clientWidth||0)>=280){"
-            + "setTimeout(function(){fs(v);},60);}},true);})();";
-
     private FrameLayout root;
     private WebView web;
     private ImageView cursor;
@@ -295,7 +285,6 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onPageFinished(WebView view, String u) {
                 if (u != null) url.setText(u);
-                view.evaluateJavascript(AUTO_FS_JS, null);
             }
         });
 
@@ -375,23 +364,6 @@ public class MainActivity extends AppCompatActivity {
                 + "c(document);})();",
                 null);
         } catch (Exception ignored) { }
-    }
-
-    /** Simule un clic au centre de l'écran en plein écran (bascule lecture/pause
-     *  sur la plupart des lecteurs web, y compris ceux d'un autre domaine). */
-    private void tapFullscreenCenter() {
-        View v = customView != null ? customView : web;
-        if (v == null) return;
-        int w = v.getWidth() > 0 ? v.getWidth() : root.getWidth();
-        int h = v.getHeight() > 0 ? v.getHeight() : root.getHeight();
-        float x = w / 2f, y = h / 2f;
-        long t = SystemClock.uptimeMillis();
-        MotionEvent down = MotionEvent.obtain(t, t, MotionEvent.ACTION_DOWN, x, y, 0);
-        MotionEvent up = MotionEvent.obtain(t, t + 80, MotionEvent.ACTION_UP, x, y, 0);
-        v.dispatchTouchEvent(down);
-        v.dispatchTouchEvent(up);
-        down.recycle();
-        up.recycle();
     }
 
     /** User-Agent courant selon le mode choisi (Auto / PC / Mobile). */
@@ -497,11 +469,6 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView v, String u) {
                 return handleOverride(u);
-            }
-
-            @Override
-            public void onPageFinished(WebView v, String u) {
-                v.evaluateJavascript(AUTO_FS_JS, null);
             }
         });
 
@@ -868,22 +835,12 @@ public class MainActivity extends AppCompatActivity {
     public boolean dispatchKeyEvent(KeyEvent e) {
         int code = e.getKeyCode();
 
-        // Plein écran vidéo : on laisse TOUTES les touches aller au lecteur
-        // (OK = lecture/pause, flèches = avance/recul de SON lecteur), car sur
-        // beaucoup de sites la vidéo est dans un lecteur d'un autre domaine
-        // qu'on ne peut pas piloter en JavaScript. Seul Retour quitte le plein
-        // écran. OK est aussi simulé en tap sur la vidéo (marche pour les
-        // lecteurs qui basculent lecture/pause au clic).
+        // En plein écran vidéo : Retour quitte le plein écran, et TOUTES les
+        // autres touches (OK, flèches avance/recul, etc.) vont directement au
+        // lecteur du site — c'est lui qui les gère nativement.
         if (customView != null) {
             if (code == KeyEvent.KEYCODE_BACK) {
                 if (e.getAction() == KeyEvent.ACTION_UP) hideFullscreen();
-                return true;
-            }
-            if ((code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER
-                    || code == KeyEvent.KEYCODE_NUMPAD_ENTER
-                    || code == KeyEvent.KEYCODE_BUTTON_A)
-                    && e.getAction() == KeyEvent.ACTION_UP) {
-                tapFullscreenCenter();
                 return true;
             }
             return super.dispatchKeyEvent(e);

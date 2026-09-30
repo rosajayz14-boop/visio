@@ -110,6 +110,9 @@ public class MainActivity extends AppCompatActivity {
 
     private View customView;
     private WebChromeClient.CustomViewCallback customViewCallback;
+    // WebView qui a demandé le plein écran : c'est à elle qu'on transmet les
+    // touches (◄ ► OK…) pour que le lecteur du site les reçoive.
+    private WebView fullscreenWeb;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -365,7 +368,7 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onShowCustomView(View view, CustomViewCallback callback) {
-                showFullscreen(view, callback);
+                showFullscreen(web, view, callback);
             }
 
             @Override
@@ -555,7 +558,7 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onShowCustomView(View view, CustomViewCallback callback) {
-                showFullscreen(view, callback);
+                showFullscreen(pw, view, callback);
             }
 
             @Override
@@ -828,13 +831,15 @@ public class MainActivity extends AppCompatActivity {
 
     // ------------------------------------------------------------- Plein écran vidéo
 
-    private void showFullscreen(View view, WebChromeClient.CustomViewCallback cb) {
+    private void showFullscreen(WebView owner, View view,
+                                WebChromeClient.CustomViewCallback cb) {
         if (customView != null) {
             cb.onCustomViewHidden();
             return;
         }
         customView = view;
         customViewCallback = cb;
+        fullscreenWeb = owner;
         bar.setVisibility(View.GONE);
         cursor.setVisibility(View.GONE);
         favOverlay.setVisibility(View.GONE);
@@ -845,9 +850,8 @@ public class MainActivity extends AppCompatActivity {
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT));
         customView.bringToFront();
-        customView.setFocusable(true);
-        customView.setFocusableInTouchMode(true);
-        customView.requestFocus();
+        // On ne donne PAS le focus à la vue plein écran : sinon les touches
+        // s'y perdent au lieu d'atteindre le lecteur (avance/recul cassé).
         enterImmersive();
     }
 
@@ -855,6 +859,7 @@ public class MainActivity extends AppCompatActivity {
         if (customView == null) return;
         root.removeView(customView);
         customView = null;
+        fullscreenWeb = null;
         if (customViewCallback != null) {
             customViewCallback.onCustomViewHidden();
             customViewCallback = null;
@@ -891,14 +896,16 @@ public class MainActivity extends AppCompatActivity {
     public boolean dispatchKeyEvent(KeyEvent e) {
         int code = e.getKeyCode();
 
-        // En plein écran vidéo : Retour quitte le plein écran, et TOUTES les
-        // autres touches (OK, flèches avance/recul, etc.) vont directement au
-        // lecteur du site — c'est lui qui les gère nativement.
+        // En plein écran vidéo : Retour quitte le plein écran ; TOUTES les
+        // autres touches (◄ ► avance/recul, OK lecture/pause…) sont transmises
+        // à la WebView qui joue la vidéo, qui les remet au lecteur du site.
         if (customView != null) {
             if (code == KeyEvent.KEYCODE_BACK) {
                 if (e.getAction() == KeyEvent.ACTION_UP) hideFullscreen();
                 return true;
             }
+            WebView target = fullscreenWeb != null ? fullscreenWeb : activeWeb();
+            if (target != null && target.dispatchKeyEvent(e)) return true;
             return super.dispatchKeyEvent(e);
         }
 

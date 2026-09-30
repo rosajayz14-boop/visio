@@ -377,41 +377,21 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception ignored) { }
     }
 
-    private boolean isPlayPauseKey(int code) {
-        return code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
-                || code == KeyEvent.KEYCODE_MEDIA_PLAY
-                || code == KeyEvent.KEYCODE_MEDIA_PAUSE;
-    }
-
-    // Récupère toutes les vidéos, y compris dans les iframes de même origine
-    // (nombreux lecteurs intégrés), et choisit la vidéo la plus pertinente.
-    private static final String VIDS_JS =
-            "function vids(){var o=[];function c(d){try{var v=d.querySelectorAll('video');"
-            + "for(var i=0;i<v.length;i++)o.push(v[i]);var f=d.querySelectorAll('iframe');"
-            + "for(var j=0;j<f.length;j++){try{if(f[j].contentDocument)c(f[j].contentDocument);}"
-            + "catch(e){}}}catch(e){}}c(document);return o;}"
-            + "function pick(){var a=vids();if(!a.length)return null;var b=a[0];"
-            + "for(var i=0;i<a.length;i++){if(!a[i].paused)return a[i];"
-            + "if((a[i].clientWidth||0)>(b.clientWidth||0))b=a[i];}return b;}";
-
-    /** Bascule lecture/pause de la vidéo de la fenêtre active. */
-    private void togglePlayPause() {
-        WebView w = activeWeb();
-        if (w == null) return;
-        w.evaluateJavascript(
-            "(function(){" + VIDS_JS + "var v=pick();"
-            + "if(v){if(v.paused){v.play();}else{v.pause();}}})();", null);
-    }
-
-    /** Avance (+) ou recule (−) la vidéo de la fenêtre active de X secondes. */
-    private void seekBy(int seconds) {
-        WebView w = activeWeb();
-        if (w == null) return;
-        w.evaluateJavascript(
-            "(function(){" + VIDS_JS + "var v=pick();if(v){"
-            + "var d=isFinite(v.duration)?v.duration:1e9;"
-            + "v.currentTime=Math.min(d,Math.max(0,v.currentTime+(" + seconds + ")));}})();",
-            null);
+    /** Simule un clic au centre de l'écran en plein écran (bascule lecture/pause
+     *  sur la plupart des lecteurs web, y compris ceux d'un autre domaine). */
+    private void tapFullscreenCenter() {
+        View v = customView != null ? customView : web;
+        if (v == null) return;
+        int w = v.getWidth() > 0 ? v.getWidth() : root.getWidth();
+        int h = v.getHeight() > 0 ? v.getHeight() : root.getHeight();
+        float x = w / 2f, y = h / 2f;
+        long t = SystemClock.uptimeMillis();
+        MotionEvent down = MotionEvent.obtain(t, t, MotionEvent.ACTION_DOWN, x, y, 0);
+        MotionEvent up = MotionEvent.obtain(t, t + 80, MotionEvent.ACTION_UP, x, y, 0);
+        v.dispatchTouchEvent(down);
+        v.dispatchTouchEvent(up);
+        down.recycle();
+        up.recycle();
     }
 
     /** User-Agent courant selon le mode choisi (Auto / PC / Mobile). */
@@ -834,10 +814,17 @@ public class MainActivity extends AppCompatActivity {
         customViewCallback = cb;
         bar.setVisibility(View.GONE);
         cursor.setVisibility(View.GONE);
+        favOverlay.setVisibility(View.GONE);
         web.setVisibility(View.GONE);
+        if (popupContainer != null) popupContainer.setVisibility(View.GONE);
+        customView.setBackgroundColor(Color.BLACK);
         root.addView(customView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT));
+        customView.bringToFront();
+        customView.setFocusable(true);
+        customView.setFocusableInTouchMode(true);
+        customView.requestFocus();
         enterImmersive();
     }
 
@@ -849,9 +836,14 @@ public class MainActivity extends AppCompatActivity {
             customViewCallback.onCustomViewHidden();
             customViewCallback = null;
         }
+        // Restaure la page principale, et le popup par-dessus s'il était ouvert.
         web.setVisibility(View.VISIBLE);
+        if (popupWeb != null && popupContainer != null) {
+            popupContainer.setVisibility(View.VISIBLE);
+        }
         exitImmersive();
-        if (cursorMode && bar.getVisibility() != View.VISIBLE) {
+        if (cursorMode && bar.getVisibility() != View.VISIBLE
+                && !popupVisible()) {
             cursor.setVisibility(View.VISIBLE);
         }
     }
@@ -876,40 +868,22 @@ public class MainActivity extends AppCompatActivity {
     public boolean dispatchKeyEvent(KeyEvent e) {
         int code = e.getKeyCode();
 
-        // Touches média de la manette : Play/Pause -> lecture/pause de la vidéo,
-        // Avance/Retour rapide -> +/- 10 s. Fonctionne partout.
-        if (isPlayPauseKey(code)) {
-            if (e.getAction() == KeyEvent.ACTION_UP) togglePlayPause();
-            return true;
-        }
-        if (code == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD) {
-            if (e.getAction() == KeyEvent.ACTION_DOWN) seekBy(10);
-            return true;
-        }
-        if (code == KeyEvent.KEYCODE_MEDIA_REWIND) {
-            if (e.getAction() == KeyEvent.ACTION_DOWN) seekBy(-10);
-            return true;
-        }
-
-        // Plein écran vidéo : gauche/droite = reculer/avancer (10 s),
-        // OK = lecture/pause, Retour = quitter le plein écran.
+        // Plein écran vidéo : on laisse TOUTES les touches aller au lecteur
+        // (OK = lecture/pause, flèches = avance/recul de SON lecteur), car sur
+        // beaucoup de sites la vidéo est dans un lecteur d'un autre domaine
+        // qu'on ne peut pas piloter en JavaScript. Seul Retour quitte le plein
+        // écran. OK est aussi simulé en tap sur la vidéo (marche pour les
+        // lecteurs qui basculent lecture/pause au clic).
         if (customView != null) {
-            if (code == KeyEvent.KEYCODE_DPAD_LEFT) {
-                if (e.getAction() == KeyEvent.ACTION_DOWN) seekBy(-10);
-                return true;
-            }
-            if (code == KeyEvent.KEYCODE_DPAD_RIGHT) {
-                if (e.getAction() == KeyEvent.ACTION_DOWN) seekBy(10);
-                return true;
-            }
-            if (code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER
-                    || code == KeyEvent.KEYCODE_NUMPAD_ENTER
-                    || code == KeyEvent.KEYCODE_BUTTON_A) {
-                if (e.getAction() == KeyEvent.ACTION_UP) togglePlayPause();
-                return true;
-            }
             if (code == KeyEvent.KEYCODE_BACK) {
                 if (e.getAction() == KeyEvent.ACTION_UP) hideFullscreen();
+                return true;
+            }
+            if ((code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER
+                    || code == KeyEvent.KEYCODE_NUMPAD_ENTER
+                    || code == KeyEvent.KEYCODE_BUTTON_A)
+                    && e.getAction() == KeyEvent.ACTION_UP) {
+                tapFullscreenCenter();
                 return true;
             }
             return super.dispatchKeyEvent(e);

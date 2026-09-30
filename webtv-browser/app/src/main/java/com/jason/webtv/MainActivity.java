@@ -66,6 +66,9 @@ public class MainActivity extends AppCompatActivity {
     private LinearLayout favList;
     private TextView favEmpty;
 
+    private FrameLayout popupContainer;
+    private WebView popupWeb;
+
     private volatile boolean adblockEnabled = true;
     // Popups bloqués par défaut : indispensable pour les sites de streaming qui
     // ouvrent une pub au clic sur « Play ». Une fois le popup bloqué, la vidéo
@@ -105,6 +108,7 @@ public class MainActivity extends AppCompatActivity {
         favOverlay = findViewById(R.id.favOverlay);
         favList = findViewById(R.id.favList);
         favEmpty = findViewById(R.id.favEmpty);
+        popupContainer = findViewById(R.id.popupContainer);
 
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
@@ -221,28 +225,16 @@ public class MainActivity extends AppCompatActivity {
                 if (!allowPopups) {
                     return false;
                 }
-                final WebView temp = new WebView(MainActivity.this);
-                temp.getSettings().setUserAgentString(currentUa());
-                temp.setWebViewClient(new WebViewClient() {
-                    @Override
-                    public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest request) {
-                        String u = (request != null && request.getUrl() != null)
-                                ? request.getUrl().toString() : null;
-                        openInMainWindow(u, temp);
-                        return true;
-                    }
-
-                    @SuppressWarnings("deprecation")
-                    @Override
-                    public boolean shouldOverrideUrlLoading(WebView v, String u) {
-                        openInMainWindow(u, temp);
-                        return true;
-                    }
-                });
-                WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
-                transport.setWebView(temp);
-                resultMsg.sendToTarget();
+                // Popups autorisés : on ouvre le popup dans une fenêtre superposée
+                // séparée. La page d'origine reste intacte dessous ; Retour ferme
+                // le popup et y revient exactement.
+                openPopupWindow(resultMsg);
                 return true;
+            }
+
+            @Override
+            public void onCloseWindow(WebView window) {
+                if (window == popupWeb) closePopup();
             }
 
             @Override
@@ -295,14 +287,140 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /** Charge dans la WebView principale l'URL d'un popup, puis jette la WebView temporaire. */
-    private void openInMainWindow(String u, WebView temp) {
-        if (u != null && (u.startsWith("http://") || u.startsWith("https://"))) {
-            web.loadUrl(u);
+    // ------------------------------------------------------------- Popups (fenêtre superposée)
+
+    private boolean popupVisible() {
+        return popupContainer != null && popupContainer.getVisibility() == View.VISIBLE;
+    }
+
+    /** WebView qui reçoit les actions du curseur : le popup s'il est ouvert, sinon la principale. */
+    private WebView activeWeb() {
+        return (popupVisible() && popupWeb != null) ? popupWeb : web;
+    }
+
+    /** Ouvre un popup dans une fenêtre superposée (la page d'origine reste dessous). */
+    private void openPopupWindow(Message resultMsg) {
+        closePopup(); // une seule fenêtre popup à la fois
+
+        popupWeb = new WebView(this);
+        configurePopupWeb(popupWeb);
+        popupContainer.addView(popupWeb, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+        popupContainer.setVisibility(View.VISIBLE);
+        if (bar.getVisibility() == View.VISIBLE) hideBar();
+        if (cursorMode) { cursor.setVisibility(View.VISIBLE); ensureCursorVisible(); }
+
+        WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
+        transport.setWebView(popupWeb);
+        resultMsg.sendToTarget();
+    }
+
+    /** Ferme le popup et revient à la page d'origine, intacte. */
+    private void closePopup() {
+        if (popupWeb != null) {
+            popupContainer.removeView(popupWeb);
+            try {
+                popupWeb.stopLoading();
+                popupWeb.loadUrl("about:blank");
+                popupWeb.destroy();
+            } catch (Exception ignored) { }
+            popupWeb = null;
         }
-        temp.post(() -> {
-            temp.stopLoading();
-            temp.destroy();
+        popupContainer.setVisibility(View.GONE);
+        web.requestFocus();
+    }
+
+    private void configurePopupWeb(final WebView pw) {
+        WebSettings s = pw.getSettings();
+        s.setJavaScriptEnabled(true);
+        s.setDomStorageEnabled(true);
+        s.setDatabaseEnabled(true);
+        s.setMediaPlaybackRequiresUserGesture(false);
+        s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+        s.setLoadWithOverviewMode(true);
+        s.setUseWideViewPort(true);
+        s.setSupportZoom(true);
+        s.setBuiltInZoomControls(true);
+        s.setDisplayZoomControls(false);
+        s.setJavaScriptCanOpenWindowsAutomatically(true);
+        s.setSupportMultipleWindows(true);
+        s.setUserAgentString(currentUa());
+        pw.setBackgroundColor(Color.BLACK);
+        pw.setFocusable(true);
+        pw.setFocusableInTouchMode(true);
+
+        CookieManager.getInstance().setAcceptThirdPartyCookies(pw, true);
+
+        pw.setWebViewClient(new WebViewClient() {
+            @Override
+            public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest request) {
+                if (adblockEnabled && request != null && request.getUrl() != null
+                        && AdBlocker.isAd(request.getUrl().toString())) {
+                    return new WebResourceResponse("text/plain", "utf-8",
+                            new ByteArrayInputStream(new byte[0]));
+                }
+                return super.shouldInterceptRequest(v, request);
+            }
+
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest request) {
+                return handleOverride(request != null && request.getUrl() != null
+                        ? request.getUrl().toString() : null);
+            }
+
+            @SuppressWarnings("deprecation")
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView v, String u) {
+                return handleOverride(u);
+            }
+        });
+
+        pw.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public void onProgressChanged(WebView v, int newProgress) {
+                progress.setProgress(newProgress);
+                progress.setVisibility(newProgress < 100 ? View.VISIBLE : View.GONE);
+            }
+
+            // Un popup à l'intérieur du popup : on navigue dans le même popup
+            // plutôt que d'empiler les fenêtres.
+            @Override
+            public boolean onCreateWindow(WebView v, boolean isDialog,
+                                          boolean isUserGesture, Message resultMsg) {
+                if (!allowPopups) return false;
+                final WebView temp = new WebView(MainActivity.this);
+                temp.getSettings().setUserAgentString(currentUa());
+                temp.setWebViewClient(new WebViewClient() {
+                    @Override
+                    public boolean shouldOverrideUrlLoading(WebView vv, WebResourceRequest request) {
+                        String u = (request != null && request.getUrl() != null)
+                                ? request.getUrl().toString() : null;
+                        if (u != null && popupWeb != null) popupWeb.loadUrl(u);
+                        temp.post(temp::destroy);
+                        return true;
+                    }
+                });
+                WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
+                transport.setWebView(temp);
+                resultMsg.sendToTarget();
+                return true;
+            }
+
+            @Override
+            public void onCloseWindow(WebView window) {
+                closePopup();
+            }
+
+            @Override
+            public void onShowCustomView(View view, CustomViewCallback callback) {
+                showFullscreen(view, callback);
+            }
+
+            @Override
+            public void onHideCustomView() {
+                hideFullscreen();
+            }
         });
     }
 
@@ -620,6 +738,27 @@ public class MainActivity extends AppCompatActivity {
             return super.dispatchKeyEvent(e);
         }
 
+        // Popup ouvert : Retour recule dans le popup puis le ferme (retour à la
+        // page d'origine) ; le curseur agit sur le popup.
+        if (popupVisible()) {
+            if (code == KeyEvent.KEYCODE_BACK) {
+                if (customView != null) {
+                    if (e.getAction() == KeyEvent.ACTION_UP) hideFullscreen();
+                    return true;
+                }
+                if (e.getAction() == KeyEvent.ACTION_UP) {
+                    if (popupWeb != null && popupWeb.canGoBack()) popupWeb.goBack();
+                    else closePopup();
+                }
+                return true;
+            }
+            if (code == KeyEvent.KEYCODE_MENU) return true;
+            if (cursorMode && customView == null) {
+                if (handleCursorKey(e)) return true;
+            }
+            return super.dispatchKeyEvent(e);
+        }
+
         // Touche MENU : afficher/cacher la barre d'adresse
         if (code == KeyEvent.KEYCODE_MENU) {
             if (e.getAction() == KeyEvent.ACTION_UP) toggleBar();
@@ -680,6 +819,11 @@ public class MainActivity extends AppCompatActivity {
                 || code == KeyEvent.KEYCODE_BUTTON_A;
 
         if (isCenter) {
+            // Dans un popup : OK = simple clic (pas de barre sur le popup).
+            if (popupVisible()) {
+                if (e.getAction() == KeyEvent.ACTION_UP) tapAtCursor();
+                return true;
+            }
             // Appui COURT = clic ; appui LONG = ouvrir la barre (utile sur les
             // télécommandes Google TV qui n'ont pas de touche MENU).
             if (e.getAction() == KeyEvent.ACTION_DOWN) {
@@ -724,19 +868,20 @@ public class MainActivity extends AppCompatActivity {
         float nx = cursorX;
         float ny = cursorY;
         int margin = 2;
+        WebView target = activeWeb();
 
         if (code == KeyEvent.KEYCODE_DPAD_LEFT) {
             nx -= step;
-            if (nx < margin) { web.scrollBy(-step, 0); nx = margin; }
+            if (nx < margin) { target.scrollBy(-step, 0); nx = margin; }
         } else if (code == KeyEvent.KEYCODE_DPAD_RIGHT) {
             nx += step;
-            if (nx > w - margin) { web.scrollBy(step, 0); nx = w - margin; }
+            if (nx > w - margin) { target.scrollBy(step, 0); nx = w - margin; }
         } else if (code == KeyEvent.KEYCODE_DPAD_UP) {
             ny -= step;
-            if (ny < margin) { web.scrollBy(0, -step); ny = margin; }
+            if (ny < margin) { target.scrollBy(0, -step); ny = margin; }
         } else if (code == KeyEvent.KEYCODE_DPAD_DOWN) {
             ny += step;
-            if (ny > h - margin) { web.scrollBy(0, step); ny = h - margin; }
+            if (ny > h - margin) { target.scrollBy(0, step); ny = h - margin; }
         }
 
         cursorX = nx;
@@ -751,8 +896,9 @@ public class MainActivity extends AppCompatActivity {
         long t = SystemClock.uptimeMillis();
         MotionEvent down = MotionEvent.obtain(t, t, MotionEvent.ACTION_DOWN, x, y, 0);
         MotionEvent up = MotionEvent.obtain(t, t + 80, MotionEvent.ACTION_UP, x, y, 0);
-        web.dispatchTouchEvent(down);
-        web.dispatchTouchEvent(up);
+        WebView target = activeWeb();
+        target.dispatchTouchEvent(down);
+        target.dispatchTouchEvent(up);
         down.recycle();
         up.recycle();
     }
@@ -776,16 +922,19 @@ public class MainActivity extends AppCompatActivity {
     protected void onPause() {
         super.onPause();
         if (web != null) web.onPause();
+        if (popupWeb != null) popupWeb.onPause();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         if (web != null) web.onResume();
+        if (popupWeb != null) popupWeb.onResume();
     }
 
     @Override
     protected void onDestroy() {
+        closePopup();
         if (web != null) {
             web.loadUrl("about:blank");
             web.destroy();

@@ -28,47 +28,54 @@
         android:progressTint="@color/accent"
         android:visibility="gone" />
 
-    <LinearLayout
+    <HorizontalScrollView
         android:id="@+id/bar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="top"
-        android:orientation="horizontal"
         android:background="@color/bar_bg"
-        android:padding="6dp"
-        android:gravity="center_vertical"
+        android:scrollbars="none"
+        android:fillViewport="false"
         android:visibility="gone">
 
-        <Button android:id="@+id/btnBack" style="@style/BarButton" android:text="Préc." />
-        <Button android:id="@+id/btnFwd" style="@style/BarButton" android:text="Suiv." />
-        <Button android:id="@+id/btnReload" style="@style/BarButton" android:text="↻" />
-        <Button android:id="@+id/btnHome" style="@style/BarButton" android:text="Accueil" />
-
-        <EditText
-            android:id="@+id/url"
-            android:layout_width="0dp"
+        <LinearLayout
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginEnd="4dp"
-            android:background="@drawable/url_bg"
-            android:hint="@string/hint_url"
-            android:textColor="#FFFFFFFF"
-            android:textColorHint="#88FFFFFF"
-            android:paddingLeft="12dp"
-            android:paddingRight="12dp"
-            android:paddingTop="8dp"
-            android:paddingBottom="8dp"
-            android:singleLine="true"
-            android:imeOptions="actionGo"
-            android:inputType="textUri"
-            android:textSize="15sp" />
+            android:orientation="horizontal"
+            android:padding="6dp"
+            android:gravity="center_vertical">
 
-        <Button android:id="@+id/btnAddFav" style="@style/BarButton" android:text="☆ Ajouter" />
-        <Button android:id="@+id/btnFav" style="@style/BarButton" android:text="★ Favoris" />
-        <Button android:id="@+id/btnCursor" style="@style/BarButton" android:text="Curseur: ON" />
-        <Button android:id="@+id/btnAd" style="@style/BarButton" android:text="Anti-pub: ON" />
-        <Button android:id="@+id/btnExit" style="@style/BarButton" android:text="Quitter" />
-    </LinearLayout>
+            <Button android:id="@+id/btnBack" style="@style/BarButton" android:text="Préc." />
+            <Button android:id="@+id/btnFwd" style="@style/BarButton" android:text="Suiv." />
+            <Button android:id="@+id/btnReload" style="@style/BarButton" android:text="↻" />
+            <Button android:id="@+id/btnHome" style="@style/BarButton" android:text="Accueil" />
+
+            <EditText
+                android:id="@+id/url"
+                android:layout_width="320dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="4dp"
+                android:background="@drawable/url_bg"
+                android:hint="@string/hint_url"
+                android:textColor="#FFFFFFFF"
+                android:textColorHint="#88FFFFFF"
+                android:paddingLeft="12dp"
+                android:paddingRight="12dp"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp"
+                android:singleLine="true"
+                android:imeOptions="actionGo"
+                android:inputType="textUri"
+                android:textSize="15sp" />
+
+            <Button android:id="@+id/btnAddFav" style="@style/BarButton" android:text="☆ Ajouter" />
+            <Button android:id="@+id/btnFav" style="@style/BarButton" android:text="★ Favoris" />
+            <Button android:id="@+id/btnUA" style="@style/BarButton" android:text="Vue: PC" />
+            <Button android:id="@+id/btnCursor" style="@style/BarButton" android:text="Curseur: ON" />
+            <Button android:id="@+id/btnAd" style="@style/BarButton" android:text="Anti-pub: ON" />
+            <Button android:id="@+id/btnExit" style="@style/BarButton" android:text="Quitter" />
+        </LinearLayout>
+    </HorizontalScrollView>
 
     <!-- Panneau des favoris (superposé, navigable à la télécommande) -->
     <LinearLayout

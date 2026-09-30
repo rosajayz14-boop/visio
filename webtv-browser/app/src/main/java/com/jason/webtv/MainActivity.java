@@ -5,6 +5,7 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.os.Bundle;
+import android.os.Message;
 import android.os.SystemClock;
 import android.text.TextUtils;
 import android.view.KeyEvent;
@@ -48,20 +49,25 @@ public class MainActivity extends AppCompatActivity {
     private static final String DESKTOP_UA =
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
             + "Chrome/124.0.0.0 Safari/537.36";
+    // UA mobile : certains lecteurs vidéo ne proposent leur player HTML5 qu'en mobile.
+    private static final String MOBILE_UA =
+            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) "
+            + "Chrome/124.0.0.0 Mobile Safari/537.36";
 
     private FrameLayout root;
     private WebView web;
     private ImageView cursor;
     private ProgressBar progress;
-    private LinearLayout bar;
+    private View bar;
     private EditText url;
-    private Button btnCursor, btnAd, btnAddFav, btnFav;
+    private Button btnCursor, btnAd, btnAddFav, btnFav, btnUA;
 
     private LinearLayout favOverlay;
     private LinearLayout favList;
     private TextView favEmpty;
 
     private volatile boolean adblockEnabled = true;
+    private boolean desktopMode = true;
     private boolean cursorMode = true;
     private boolean cursorInit = false;
     private float cursorX, cursorY;
@@ -86,6 +92,7 @@ public class MainActivity extends AppCompatActivity {
         btnAd = findViewById(R.id.btnAd);
         btnAddFav = findViewById(R.id.btnAddFav);
         btnFav = findViewById(R.id.btnFav);
+        btnUA = findViewById(R.id.btnUA);
         favOverlay = findViewById(R.id.favOverlay);
         favList = findViewById(R.id.favList);
         favEmpty = findViewById(R.id.favEmpty);
@@ -128,11 +135,13 @@ public class MainActivity extends AppCompatActivity {
         s.setBuiltInZoomControls(true);
         s.setDisplayZoomControls(false);
         s.setJavaScriptCanOpenWindowsAutomatically(true);
-        s.setSupportMultipleWindows(false);
+        // Multi-fenêtres activé : on récupère les popups (lecteurs qui s'ouvrent
+        // dans un nouvel onglet) pour les charger dans la fenêtre principale.
+        s.setSupportMultipleWindows(true);
         s.setAllowFileAccess(true);
         s.setAllowContentAccess(true);
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
-        s.setUserAgentString(DESKTOP_UA);
+        s.setUserAgentString(desktopMode ? DESKTOP_UA : MOBILE_UA);
 
         web.setBackgroundColor(Color.BLACK);
         web.setFocusable(true);
@@ -182,6 +191,37 @@ public class MainActivity extends AppCompatActivity {
                 progress.setVisibility(newProgress < 100 ? View.VISIBLE : View.GONE);
             }
 
+            // Popups / target="_blank" / window.open : on capture l'URL cible via
+            // une WebView temporaire et on la charge dans la fenêtre principale.
+            // Indispensable pour de nombreux sites de streaming.
+            @Override
+            public boolean onCreateWindow(WebView view, boolean isDialog,
+                                          boolean isUserGesture, Message resultMsg) {
+                final WebView temp = new WebView(MainActivity.this);
+                temp.getSettings().setUserAgentString(
+                        desktopMode ? DESKTOP_UA : MOBILE_UA);
+                temp.setWebViewClient(new WebViewClient() {
+                    @Override
+                    public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest request) {
+                        String u = (request != null && request.getUrl() != null)
+                                ? request.getUrl().toString() : null;
+                        openInMainWindow(u, temp);
+                        return true;
+                    }
+
+                    @SuppressWarnings("deprecation")
+                    @Override
+                    public boolean shouldOverrideUrlLoading(WebView v, String u) {
+                        openInMainWindow(u, temp);
+                        return true;
+                    }
+                });
+                WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
+                transport.setWebView(temp);
+                resultMsg.sendToTarget();
+                return true;
+            }
+
             @Override
             public void onShowCustomView(View view, CustomViewCallback callback) {
                 showFullscreen(view, callback);
@@ -213,6 +253,17 @@ public class MainActivity extends AppCompatActivity {
         } else {
             web.loadUrl("https://www.google.com/search?q=" + android.net.Uri.encode(u));
         }
+    }
+
+    /** Charge dans la WebView principale l'URL d'un popup, puis jette la WebView temporaire. */
+    private void openInMainWindow(String u, WebView temp) {
+        if (u != null && (u.startsWith("http://") || u.startsWith("https://"))) {
+            web.loadUrl(u);
+        }
+        temp.post(() -> {
+            temp.stopLoading();
+            temp.destroy();
+        });
     }
 
     // ------------------------------------------------------------- Boutons UI
@@ -249,6 +300,13 @@ public class MainActivity extends AppCompatActivity {
         btnFav.setOnClickListener(v -> showFavorites());
         ((Button) findViewById(R.id.btnFavClose)).setOnClickListener(v -> hideFavorites());
 
+        btnUA.setOnClickListener(v -> {
+            desktopMode = !desktopMode;
+            web.getSettings().setUserAgentString(desktopMode ? DESKTOP_UA : MOBILE_UA);
+            updateToggleLabels();
+            web.reload();
+        });
+
         url.setOnEditorActionListener((v, actionId, event) -> {
             boolean go = actionId == EditorInfo.IME_ACTION_GO
                     || actionId == EditorInfo.IME_ACTION_DONE
@@ -267,6 +325,7 @@ public class MainActivity extends AppCompatActivity {
     private void updateToggleLabels() {
         btnCursor.setText(cursorMode ? "Curseur: ON" : "Curseur: OFF");
         btnAd.setText(adblockEnabled ? "Anti-pub: ON" : "Anti-pub: OFF");
+        btnUA.setText(desktopMode ? "Vue: PC" : "Vue: Mobile");
     }
 
     // ------------------------------------------------------- Barre d'adresse

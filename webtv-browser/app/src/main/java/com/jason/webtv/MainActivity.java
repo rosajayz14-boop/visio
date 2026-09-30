@@ -270,6 +270,18 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    /** Met en pause les vidéos/audios de la page courante (le son ne continue
+     *  pas quand on quitte la vidéo en reculant). */
+    private void pauseMedia(WebView w) {
+        if (w == null) return;
+        try {
+            w.evaluateJavascript(
+                "(function(){try{var m=document.querySelectorAll('video,audio');"
+                + "for(var i=0;i<m.length;i++){try{m[i].pause();}catch(e){}}}catch(e){}})();",
+                null);
+        } catch (Exception ignored) { }
+    }
+
     /** User-Agent courant selon le mode choisi (Auto / PC / Mobile). */
     private String currentUa() {
         switch (uaMode) {
@@ -428,7 +440,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void setupButtons() {
         ((Button) findViewById(R.id.btnBack)).setOnClickListener(v -> {
-            if (web.canGoBack()) web.goBack();
+            if (web.canGoBack()) { pauseMedia(web); web.goBack(); }
         });
         ((Button) findViewById(R.id.btnFwd)).setOnClickListener(v -> {
             if (web.canGoForward()) web.goForward();
@@ -794,6 +806,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         if (web.canGoBack()) {
+            pauseMedia(web);
             web.goBack();
             return;
         }

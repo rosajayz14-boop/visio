@@ -71,10 +71,27 @@ public final class Favorites {
         return arr.toString();
     }
 
+    /** Clé de comparaison : ignore le « / » final et la casse du schéma/hôte, pour
+     *  que site.com et site.com/ ne fassent pas deux favoris. */
+    static String key(String url) {
+        if (url == null) return "";
+        String s = url.trim();
+        while (s.endsWith("/")) s = s.substring(0, s.length() - 1);
+        int p = s.indexOf("://");
+        if (p > 0) {
+            int slash = s.indexOf('/', p + 3);
+            String head = slash > 0 ? s.substring(0, slash) : s;
+            String tail = slash > 0 ? s.substring(slash) : "";
+            s = head.toLowerCase() + tail;
+        }
+        return s;
+    }
+
     public static boolean contains(Context c, String url) {
         if (TextUtils.isEmpty(url)) return false;
+        String k = key(url);
         for (Item it : list(c)) {
-            if (it.url.equals(url)) return true;
+            if (key(it.url).equals(k)) return true;
         }
         return false;
     }
@@ -89,10 +106,11 @@ public final class Favorites {
         if (!(url.startsWith("http://") || url.startsWith("https://"))) return false;
         if (TextUtils.isEmpty(title)) title = url;
 
+        String k = key(url);
         List<Item> items = list(c);
         List<Item> kept = new ArrayList<>();
         for (Item it : items) {
-            if (!it.url.equals(url)) kept.add(it);
+            if (!key(it.url).equals(k)) kept.add(it);
         }
         kept.add(new Item(title.trim(), url));
         save(c, kept);
@@ -102,10 +120,11 @@ public final class Favorites {
     /** Supprime le favori correspondant à cette URL. */
     public static void remove(Context c, String url) {
         if (TextUtils.isEmpty(url)) return;
+        String k = key(url);
         List<Item> items = list(c);
         List<Item> kept = new ArrayList<>();
         for (Item it : items) {
-            if (!it.url.equals(url)) kept.add(it);
+            if (!key(it.url).equals(k)) kept.add(it);
         }
         save(c, kept);
     }

@@ -1,140 +1,74 @@
-# WebTV — navigateur sans pub pour Fire TV & Google TV Streamer 4K
+# WebTV — navigateur vidéo pour Google TV Streamer 4K & Fire TV
 
-Application Android TV : un **navigateur web plein écran** avec **bloqueur de publicités intégré**
-et un **mode curseur** pilotable à la télécommande. Un seul APK fonctionne sur **Amazon Fire TV /
-Fire Stick** et sur le **Google TV Streamer 4K** (et tout appareil Android TV).
+Navigateur web **plein écran, piloté à la télécommande**, pensé pour regarder des sites
+vidéo sur une TV Android (Google TV, Fire TV, Android TV). Un seul APK pour tous.
 
----
+## Fonctions
 
-## Ce que l'app fait
+- **Curseur à la télécommande** : la croix déplace un pointeur, **OK** clique. Il se cache
+  tout seul après 3 s et revient au premier appui. Désactivable (« Curseur: OFF »).
+- **Favoris** : « ☆ Ajouter » enregistre la page, « ★ Favoris » ouvre la liste (OK ouvre,
+  « Supprimer » enlève). La page d'accueil affiche tes favoris en tuiles avec leur icône.
+- **Anti-pub** par liste de domaines (`app/src/main/assets/adblock_hosts.txt`), désactivable.
+- **Popups** : bloqués par défaut (les pubs au clic sur « Play » disparaissent, la vidéo se
+  lance en place) ; les vrais liens « nouvel onglet » s'ouvrent quand même dans la page.
+  « Popups: ON » ouvre les popups dans une fenêtre séparée ; **Retour** revient à la page.
+- **Vue : Auto / PC / Mobile** : change le User-Agent. « Auto » (défaut) passe Cloudflare et
+  les connexions ; « PC » / « Mobile » dépannent un lecteur capricieux.
+- **Zoom texte A− / A+** pour la lisibilité des sites « PC » sur TV (mémorisé).
+- **Vidéo en plein écran** : **◄ ►** reculent / avancent de 10 s, **OK** lecture/pause, avec
+  un indicateur à l'écran ; **Retour** quitte le plein écran. Fonctionne aussi quand le
+  lecteur est dans une iframe d'un autre domaine (script injecté dans chaque frame).
+  Si aucune vidéo n'est détectée, les touches vont au lecteur du site tel quel.
+- **Mises à jour automatiques** : au lancement, l'app propose la nouvelle version en un clic
+  (« Installer », « Plus tard », « Ignorer cette version »).
+- Les réglages (Vue, Popups, Anti-pub, Curseur, Zoom) sont **mémorisés**.
 
-- Ouvre n'importe quel site web sur ta TV (barre d'adresse + recherche Google).
-- **Bloque les pubs et traceurs** via une liste de ~150 domaines (régies pub, pré-rolls vidéo,
-  pop-ups des sites de streaming gratuits). Modifiable dans `app/src/main/assets/adblock_hosts.txt`.
-- **Mode curseur** : la croix de la télécommande déplace un pointeur, le bouton OK clique — indispensable
-  pour naviguer sur des sites non pensés pour la TV.
-- **Lecture vidéo HTML5 en plein écran** (autoplay activé).
-- Garde l'écran allumé pendant la lecture.
+## Télécommande
 
-## Ce que l'app ne peut PAS faire (limite technique de WebView, pas un choix)
+| Geste | Effet |
+|---|---|
+| **OK long** (≈ ½ s) — ou **MENU** sur Fire TV | Ouvre / ferme la barre d'outils (dans tous les modes) |
+| Croix | Déplace le curseur (ou navigation native si Curseur: OFF) |
+| OK court | Clic |
+| Retour | Page précédente (coupe le son de la vidéo) · ferme popup / plein écran · ×2 : quitter |
+| En plein écran : ◄ ► / OK | −10 s / +10 s / lecture-pause |
 
-- **Netflix, Disney+, Amazon Prime Video** : protégés par DRM (Widevine L1) — ils ne jouent pas dans un
-  navigateur WebView. Utilise leurs applications officielles.
-- **Pubs YouTube** : servies depuis le même domaine que les vidéos, donc non bloquables par liste de
-  domaines. Pour YouTube sans pub, il faut l'app YouTube + un abonnement, ou une app dédiée.
-- Le blocage est basé sur les **domaines** : il enlève la grande majorité des pubs et pop-ups, mais pas
-  100 % sur tous les sites (pas de filtrage cosmétique CSS).
+## Ce que l'app ne peut pas faire
 
----
+- **Netflix, Disney+, Prime Video, Canal+…** : DRM (Widevine L1) → ne jouent pas dans une
+  WebView. Utilise leurs applications.
+- Le blocage de pubs est par **domaine** : très efficace sur les sites de streaming gratuits,
+  mais pas de filtrage cosmétique.
 
-## Obtenir l'APK — 3 méthodes
+## Obtenir / mettre à jour l'APK
 
-### ✅ Méthode 1 (recommandée) — GitHub Actions : **zéro logiciel à installer**
+Le dépôt compile automatiquement à chaque push (GitHub Actions). Pour une version installable :
 
-1. Crée un compte gratuit sur https://github.com (si tu n'en as pas).
-2. Crée un nouveau dépôt (bouton **New repository**), par ex. `webtv`, en **Public** ou **Private**.
-3. Envoie ce projet dans le dépôt. Depuis un terminal, dans le dossier du projet :
-   ```bash
-   git init
-   git add .
-   git commit -m "WebTV v1.0"
-   git branch -M main
-   git remote add origin https://github.com/TON_UTILISATEUR/webtv.git
-   git push -u origin main
-   ```
-   *(Ou glisse-dépose les fichiers via le bouton « Add file » → « Upload files » sur github.com.)*
-4. Va dans l'onglet **Actions** du dépôt : le build « Build APK WebTV » démarre tout seul.
-   Attends ~3-5 minutes qu'il passe au vert ✅.
-5. Clique sur le build terminé → section **Artifacts** → télécharge **WebTV-debug-apk**
-   (un `.zip` contenant `app-debug.apk`).
+1. Mets à jour `versionName` (et `versionCode`) dans `app/build.gradle`.
+2. Crée une **Release** GitHub avec le tag **`v<versionName>`** (ex. `v3.3`). Le workflow
+   vérifie que le tag correspond, compile et attache `app-debug.apk`.
+3. Lien direct : `https://github.com/<user>/<repo>/releases/download/v3.3/app-debug.apk`
+   (utilisable dans **Downloader** ou via un code **aftv.news**).
+4. Ensuite, l'app installée se met à jour **toute seule** au lancement.
 
-**Astuce pour installer directement sur la TV** : crée plutôt une *Release*. Fais
-`git tag v1.0 && git push origin v1.0`. GitHub compile et publie automatiquement l'APK dans
-**Releases**, avec une **URL publique** que tu peux coller dans l'app **Downloader** de la TV (voir plus bas).
+### Signature stable (important)
 
-### Méthode 2 — Android Studio (si tu l'as déjà)
+L'APK est signé avec `app/debug.keystore`, **versionné dans le dépôt**. Toutes les versions
+ont donc la même signature et s'installent **par-dessus** la précédente sans désinstaller.
+(Avant cela, chaque build CI générait une clé aléatoire → « Application non installée ».)
+Le premier passage vers une version à clé fixe demande **une** désinstallation de l'ancienne.
 
-1. Ouvre le dossier du projet dans **Android Studio**.
-2. Laisse-le télécharger le SDK et synchroniser Gradle.
-3. Menu **Build → Build Bundle(s) / APK(s) → Build APK(s)**.
-4. L'APK est dans `app/build/outputs/apk/debug/app-debug.apk`.
+## Structure
 
-### Méthode 3 — Ligne de commande (Mac / PC / Linux)
-
-Pré-requis : **JDK 17** et le **SDK Android** (via Android Studio ou les *command-line tools*).
-Crée un fichier `local.properties` à la racine avec le chemin du SDK :
 ```
-sdk.dir=/Users/toi/Library/Android/sdk        # Mac
-# sdk.dir=C:\\Users\\toi\\AppData\\Local\\Android\\Sdk   # Windows
+app/src/main/java/com/jason/webtv/
+  MainActivity.java   UI, télécommande, curseur, popups, plein écran, contrôle vidéo, updater
+  Favorites.java      favoris (SharedPreferences/JSON)
+  Updater.java        vérification + téléchargement des Releases GitHub
+  AdBlocker.java      liste de domaines bloqués
+app/src/main/assets/home.html     page d'accueil (tuiles de favoris)
+app/src/main/assets/adblock_hosts.txt
+app/debug.keystore                clé de signature fixe
+.github/workflows/build.yml       build + Release
 ```
-Puis :
-```bash
-./gradlew assembleDebug          # (gradlew.bat sur Windows)
-```
-APK généré dans `app/build/outputs/apk/debug/app-debug.apk`.
-
-> L'APK est signé avec la clé *debug* : parfait pour l'installer soi-même (sideload). Pas besoin du Play Store.
-
----
-
-## Installer l'APK sur Fire TV / Fire Stick
-
-1. **Réglages → My Fire TV → Options pour les développeurs** : active
-   **Applications de sources inconnues** (Apps from Unknown Sources).
-2. Installe l'app **Downloader** (depuis l'Appstore Amazon).
-3. **Option A (URL publique)** : dans Downloader, entre l'URL de l'APK de ta *Release* GitHub
-   → il télécharge et propose d'installer.
-   **Option B (ADB, depuis ton ordi, même réseau Wi-Fi)** :
-   ```bash
-   adb connect IP_DE_LA_TV:5555
-   adb install app-debug.apk
-   ```
-   *(L'IP est dans Réglages → My Fire TV → À propos → Réseau.)*
-4. L'app **WebTV** apparaît dans « Vos applications et chaînes ».
-
-## Installer l'APK sur Google TV Streamer 4K
-
-1. **Paramètres → Système → À propos** : clique 7 fois sur **Version d'Android** pour activer les
-   options développeur, puis **Système → Options pour les développeurs → Débogage USB** (pour ADB).
-2. **Paramètres → Applications → Sécurité** : autorise l'installation depuis la source utilisée
-   (Downloader, ou le débogage).
-3. Même choix qu'au-dessus : app **Downloader** avec l'URL de la Release, **ou** ADB par le réseau :
-   ```bash
-   adb connect IP_DU_STREAMER:5555
-   adb install app-debug.apk
-   ```
-4. WebTV apparaît dans la liste des applications (utilise « Voir toutes les apps » si besoin).
-
----
-
-## Utilisation à la télécommande
-
-| Touche | Action |
-|--------|--------|
-| **MENU** (≡) | Affiche / cache la barre d'adresse |
-| **Croix directionnelle** | Déplace le curseur (et fait défiler la page aux bords) |
-| **OK / centre** | Clique là où est le curseur |
-| **Retour** | Page précédente — puis 2× pour quitter |
-| Bouton **Curseur** | Active/désactive le mode curseur |
-| Bouton **Anti-pub** | Active/désactive le blocage de pub (recharge la page) |
-
-Au démarrage, la barre d'adresse est ouverte : tape une adresse ou une recherche, puis **OK/Aller**.
-
----
-
-## Personnaliser le blocage de pub
-
-Édite `app/src/main/assets/adblock_hosts.txt` : un domaine par ligne. Le domaine **et ses sous-domaines**
-sont bloqués. Recompile ensuite (méthode 1, 2 ou 3). N'ajoute pas de domaine « à double usage »
-(ex. un domaine qui sert aussi à la connexion) sous peine de casser certains sites.
-
-## Détails techniques
-
-- `minSdk 21` (couvre les vieux Fire Stick) · `targetSdk 34` · `compileSdk 34`
-- AGP 8.6.1 · Gradle 8.7 · Java 17 · AndroidX (AppCompat + WebKit)
-- Compatible lanceur TV via `LEANBACK_LAUNCHER` + bannière `@drawable/banner`
-
-## Note
-
-Le blocage de publicités est un usage légitime et répandu. Utilise ce navigateur pour accéder à des
-contenus auxquels tu as droit, et respecte les droits d'auteur et les conditions des sites que tu visites.

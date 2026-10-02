@@ -7,6 +7,7 @@ import android.content.pm.PackageInfo;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.net.Uri;
+import android.net.http.SslError;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Message;
@@ -21,7 +22,9 @@ import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
+import android.webkit.SslErrorHandler;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
@@ -38,9 +41,12 @@ import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.FileProvider;
+import androidx.webkit.WebViewCompat;
+import androidx.webkit.WebViewFeature;
 
 import java.io.ByteArrayInputStream;
 import java.io.File;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -114,6 +120,35 @@ public class MainActivity extends AppCompatActivity {
     // touches (◄ ► OK…) pour que le lecteur du site les reçoive.
     private WebView fullscreenWeb;
 
+    // Zoom du texte (lisibilité TV), mémorisé
+    private static final String K_TEXTZOOM = "text_zoom";
+    private static final int[] TEXT_ZOOMS = {75, 100, 125, 150, 175};
+    private int textZoom = 100;
+
+    // Mise à jour : version ignorée par l'utilisateur, et mise à jour en attente
+    // d'autorisation d'installation (reprise dans onResume).
+    private static final String K_SKIP_TAG = "skip_tag";
+    private Updater.Release pendingUpdate;
+
+    // Vrai uniquement quand la page d'accueil interne est affichée : le pont
+    // AndroidFav (lecture des favoris) n'est exposé qu'à elle.
+    private volatile boolean onHomePage = false;
+
+    // Erreurs SSL : un seul message par courte période (évite le spam de toasts)
+    private long lastSslToast = 0L;
+
+    // ---- Contrôle vidéo universel (voir section « Contrôle vidéo ») ----
+    // Un script injecté dans CHAQUE frame (y compris les lecteurs d'un autre
+    // domaine) signale la présence d'une vidéo et exécute nos commandes.
+    private TextView osd;
+    private final Object videoLock = new Object();
+    private String videoCmd = null;      // commande en attente : "seek:10", "toggle"…
+    private long videoCmdAt = 0L;
+    private volatile long videoSeenAt = 0L;      // dernier signalement d'une vidéo
+    private volatile boolean videoPlaying = false;
+    private volatile int pauseGen = 0;           // incrémenté = toutes les frames se mettent en pause
+    private final Runnable osdHideRunnable = () -> { if (osd != null) osd.setVisibility(View.GONE); };
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -135,8 +170,16 @@ public class MainActivity extends AppCompatActivity {
         favList = findViewById(R.id.favList);
         favEmpty = findViewById(R.id.favEmpty);
         popupContainer = findViewById(R.id.popupContainer);
+        osd = findViewById(R.id.osd);
 
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+
+        // Nettoie un éventuel APK de mise à jour déjà installé.
+        try {
+            File dir = getExternalFilesDir(null);
+            File old = new File(dir != null ? dir : getCacheDir(), "update.apk");
+            if (old.exists()) old.delete();
+        } catch (Exception ignored) { }
 
         // Charge la liste anti-pub en arrière-plan pour ne pas bloquer le démarrage.
         final Context app = getApplicationContext();
@@ -152,22 +195,38 @@ public class MainActivity extends AppCompatActivity {
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
 
-        web.loadUrl(HOME_URL);
+        boolean restored = savedInstanceState != null
+                && web.restoreState(savedInstanceState) != null;
 
-        if (Favorites.list(getApplicationContext()).isEmpty()) {
-            // Premier lancement : barre d'adresse prête à recevoir une URL.
-            bar.setVisibility(View.VISIBLE);
-            cursor.setVisibility(View.GONE);
-            url.requestFocus();
-        } else {
-            // Des favoris existent : on arrive directement sur la grille, curseur
-            // prêt, sans clavier qui s'ouvre tout seul.
+        if (restored) {
+            // Android avait tué l'app en arrière-plan : on reprend la page et
+            // l'historique là où ils étaient.
             bar.setVisibility(View.GONE);
             web.requestFocus();
             root.post(this::ensureCursorVisible);
+        } else {
+            web.loadUrl(HOME_URL);
+            if (Favorites.list(getApplicationContext()).isEmpty()) {
+                // Premier lancement : barre d'adresse prête à recevoir une URL.
+                bar.setVisibility(View.VISIBLE);
+                cursor.setVisibility(View.GONE);
+                url.requestFocus();
+            } else {
+                // Des favoris existent : on arrive directement sur la grille, curseur
+                // prêt, sans clavier qui s'ouvre tout seul.
+                bar.setVisibility(View.GONE);
+                web.requestFocus();
+                root.post(this::ensureCursorVisible);
+            }
         }
 
         checkForUpdate();
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        if (web != null) web.saveState(outState);
     }
 
     // ---------------------------------------------------------------- Réglages
@@ -179,6 +238,8 @@ public class MainActivity extends AppCompatActivity {
         allowPopups = p.getBoolean(K_POPUPS, false);
         adblockEnabled = p.getBoolean(K_ADBLOCK, true);
         cursorMode = p.getBoolean(K_CURSOR, true);
+        textZoom = p.getInt(K_TEXTZOOM, 100);
+        if (textZoom < 50 || textZoom > 300) textZoom = 100;
     }
 
     private void saveSettings() {
@@ -187,16 +248,25 @@ public class MainActivity extends AppCompatActivity {
                 .putBoolean(K_POPUPS, allowPopups)
                 .putBoolean(K_ADBLOCK, adblockEnabled)
                 .putBoolean(K_CURSOR, cursorMode)
+                .putInt(K_TEXTZOOM, textZoom)
                 .apply();
+    }
+
+    /** Applique le zoom texte à toutes les WebView ouvertes. */
+    private void applyTextZoom() {
+        if (web != null) web.getSettings().setTextZoom(textZoom);
+        if (popupWeb != null) popupWeb.getSettings().setTextZoom(textZoom);
     }
 
     // ---------------------------------------------------------- Mise à jour auto
 
     /** Vérifie en arrière-plan s'il existe une version plus récente sur GitHub. */
     private void checkForUpdate() {
+        final String skipped = getSharedPreferences(PREFS, MODE_PRIVATE).getString(K_SKIP_TAG, "");
         new Thread(() -> {
             final Updater.Release rel = Updater.fetchLatest();
             if (rel == null) return;
+            if (rel.tag.equals(skipped)) return; // version ignorée par l'utilisateur
             String local;
             try {
                 PackageInfo pi = getPackageManager().getPackageInfo(getPackageName(), 0);
@@ -217,15 +287,21 @@ public class MainActivity extends AppCompatActivity {
                         + "Voulez-vous l'installer maintenant ?")
                 .setPositiveButton("Installer", (d, w) -> startUpdateDownload(rel))
                 .setNegativeButton("Plus tard", null)
+                .setNeutralButton("Ignorer cette version", (d, w) ->
+                        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                .putString(K_SKIP_TAG, rel.tag).apply())
                 .show();
     }
 
     private void startUpdateDownload(final Updater.Release rel) {
         // Sur Android 8+, l'app doit être autorisée à installer des applis.
+        // On mémorise la mise à jour : dès que l'autorisation est donnée et
+        // qu'on revient dans l'app, le téléchargement reprend tout seul.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 && !getPackageManager().canRequestPackageInstalls()) {
+            pendingUpdate = rel;
             Toast.makeText(this,
-                    "Autorise WebTV à installer des applications, puis relance la mise à jour",
+                    "Autorise WebTV à installer des applications : la mise à jour reprendra au retour",
                     Toast.LENGTH_LONG).show();
             try {
                 startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
@@ -233,6 +309,7 @@ public class MainActivity extends AppCompatActivity {
             } catch (Exception ignored) { }
             return;
         }
+        pendingUpdate = null;
 
         Toast.makeText(this, "Téléchargement de la mise à jour…", Toast.LENGTH_SHORT).show();
         final Context app = getApplicationContext();
@@ -294,6 +371,7 @@ public class MainActivity extends AppCompatActivity {
                 .replaceAll("\\s+", " ")
                 .trim();
         s.setUserAgentString(currentUa());
+        s.setTextZoom(textZoom);
 
         web.setBackgroundColor(Color.BLACK);
         web.setFocusable(true);
@@ -301,6 +379,9 @@ public class MainActivity extends AppCompatActivity {
 
         // Pont pour que la page d'accueil (home.html) affiche les favoris.
         web.addJavascriptInterface(new FavBridge(), "AndroidFav");
+        // Pont + script de contrôle vidéo, dans toutes les frames.
+        web.addJavascriptInterface(new VideoBridge(), "AndroidVideo");
+        installVideoScript(web);
 
         web.setWebViewClient(new WebViewClient() {
             @Override
@@ -328,11 +409,33 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onPageStarted(WebView view, String u, Bitmap favicon) {
                 if (u != null) url.setText(u);
+                onHomePage = u != null && u.startsWith(HOME_URL);
             }
 
             @Override
             public void onPageFinished(WebView view, String u) {
                 if (u != null) url.setText(u);
+                onHomePage = u != null && u.startsWith(HOME_URL);
+                // Secours si l'injection « document start » n'est pas disponible :
+                // au moins la frame principale reçoit le script (garde anti-doublon).
+                view.evaluateJavascript(VIDEO_SCRIPT, null);
+            }
+
+            @Override
+            public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
+                handler.cancel(); // on ne contourne pas la sécurité, mais on l'explique
+                sslToast(error != null ? error.getUrl() : null);
+            }
+
+            @Override
+            public void onReceivedError(WebView view, WebResourceRequest request,
+                                        WebResourceError error) {
+                if (request != null && request.isForMainFrame()) {
+                    Toast.makeText(MainActivity.this,
+                            "Impossible de charger la page" + (error != null
+                                    ? " (" + error.getDescription() + ")" : ""),
+                            Toast.LENGTH_SHORT).show();
+                }
             }
         });
 
@@ -352,6 +455,9 @@ public class MainActivity extends AppCompatActivity {
                 // Popups bloqués : on n'ouvre rien -> la vidéo se joue en place
                 // sur les sites de streaming à pub.
                 if (!allowPopups) {
+                    // …mais un VRAI lien « nouvel onglet » s'ouvre dans la même page,
+                    // sinon le clic ne ferait rien du tout.
+                    openAnchorInSameWindow(view, web);
                     return false;
                 }
                 // Popups autorisés : on ouvre le popup dans une fenêtre superposée
@@ -381,8 +487,10 @@ public class MainActivity extends AppCompatActivity {
     /** Garde le http/https dans l'app, ignore les schémas externes (intent://, market://…). */
     private boolean handleOverride(String u) {
         if (u == null) return false;
+        // Seuls http(s) et about: sont navigables depuis une page. Les pages
+        // internes (file://) ne sont chargées que par l'app elle-même (loadUrl).
         return !(u.startsWith("http://") || u.startsWith("https://")
-                || u.startsWith("file:") || u.startsWith("about:"));
+                || u.startsWith("about:"));
     }
 
     private void navigateTo(String input) {
@@ -401,16 +509,45 @@ public class MainActivity extends AppCompatActivity {
 
     /** Met en pause les vidéos/audios de la page courante (le son ne continue
      *  pas quand on quitte la vidéo en reculant). */
+    private static final String PAUSE_JS =
+            "(function(){function c(d){try{var m=d.querySelectorAll('video,audio');"
+            + "for(var i=0;i<m.length;i++){try{m[i].pause();}catch(e){}}"
+            + "var f=d.querySelectorAll('iframe');for(var j=0;j<f.length;j++){"
+            + "try{if(f[j].contentDocument)c(f[j].contentDocument);}catch(e){}}}catch(e){}}"
+            + "c(document);})();";
+
     private void pauseMedia(WebView w) {
         if (w == null) return;
+        pauseGen++; // les frames (même d'un autre domaine) se mettent en pause
         try {
-            w.evaluateJavascript(
-                "(function(){function c(d){try{var m=d.querySelectorAll('video,audio');"
-                + "for(var i=0;i<m.length;i++){try{m[i].pause();}catch(e){}}"
-                + "var f=d.querySelectorAll('iframe');for(var j=0;j<f.length;j++){"
-                + "try{if(f[j].contentDocument)c(f[j].contentDocument);}catch(e){}}}catch(e){}}"
-                + "c(document);})();",
-                null);
+            w.evaluateJavascript(PAUSE_JS, null);
+        } catch (Exception ignored) { }
+    }
+
+    /** Met en pause PUIS exécute l'action (ex. goBack) : plus de course entre le
+     *  JavaScript asynchrone et la navigation. */
+    private void pauseThen(WebView w, Runnable then) {
+        if (w == null) { then.run(); return; }
+        pauseGen++;
+        try {
+            w.evaluateJavascript(PAUSE_JS, v -> then.run());
+        } catch (Exception e) {
+            then.run();
+        }
+    }
+
+    /** Popups bloqués : si le clic était un VRAI lien (target=_blank), on l'ouvre
+     *  dans la fenêtre indiquée au lieu de ne rien faire. */
+    private void openAnchorInSameWindow(WebView from, WebView into) {
+        try {
+            WebView.HitTestResult r = from.getHitTestResult();
+            if (r != null && r.getType() == WebView.HitTestResult.SRC_ANCHOR_TYPE) {
+                String u = r.getExtra();
+                if (u != null && (u.startsWith("http://") || u.startsWith("https://"))
+                        && into != null) {
+                    into.loadUrl(u);
+                }
+            }
         } catch (Exception ignored) { }
     }
 
@@ -490,11 +627,16 @@ public class MainActivity extends AppCompatActivity {
         s.setJavaScriptCanOpenWindowsAutomatically(true);
         s.setSupportMultipleWindows(true);
         s.setUserAgentString(currentUa());
+        s.setTextZoom(textZoom);
         pw.setBackgroundColor(Color.BLACK);
         pw.setFocusable(true);
         pw.setFocusableInTouchMode(true);
 
         CookieManager.getInstance().setAcceptThirdPartyCookies(pw, true);
+
+        // Contrôle vidéo aussi dans la fenêtre popup (lecteurs en nouvel onglet).
+        pw.addJavascriptInterface(new VideoBridge(), "AndroidVideo");
+        installVideoScript(pw);
 
         pw.setWebViewClient(new WebViewClient() {
             @Override
@@ -518,6 +660,17 @@ public class MainActivity extends AppCompatActivity {
             public boolean shouldOverrideUrlLoading(WebView v, String u) {
                 return handleOverride(u);
             }
+
+            @Override
+            public void onPageFinished(WebView v, String u) {
+                v.evaluateJavascript(VIDEO_SCRIPT, null);
+            }
+
+            @Override
+            public void onReceivedSslError(WebView v, SslErrorHandler handler, SslError error) {
+                handler.cancel();
+                sslToast(error != null ? error.getUrl() : null);
+            }
         });
 
         pw.setWebChromeClient(new WebChromeClient() {
@@ -532,7 +685,10 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public boolean onCreateWindow(WebView v, boolean isDialog,
                                           boolean isUserGesture, Message resultMsg) {
-                if (!allowPopups) return false;
+                if (!allowPopups) {
+                    openAnchorInSameWindow(v, popupWeb);
+                    return false;
+                }
                 final WebView temp = new WebView(MainActivity.this);
                 temp.getSettings().setUserAgentString(currentUa());
                 temp.setWebViewClient(new WebViewClient() {
@@ -572,7 +728,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void setupButtons() {
         ((Button) findViewById(R.id.btnBack)).setOnClickListener(v -> {
-            if (web.canGoBack()) { pauseMedia(web); web.goBack(); }
+            if (web.canGoBack()) pauseThen(web, () -> { if (web != null) web.goBack(); });
         });
         ((Button) findViewById(R.id.btnFwd)).setOnClickListener(v -> {
             if (web.canGoForward()) web.goForward();
@@ -581,9 +737,10 @@ public class MainActivity extends AppCompatActivity {
         ((Button) findViewById(R.id.btnHome)).setOnClickListener(v -> web.loadUrl(HOME_URL));
         ((Button) findViewById(R.id.btnExit)).setOnClickListener(v -> finish());
 
-        // Zoom de la page (lisibilité des sites « PC » sur une TV)
-        ((Button) findViewById(R.id.btnZoomOut)).setOnClickListener(v -> web.zoomOut());
-        ((Button) findViewById(R.id.btnZoomIn)).setOnClickListener(v -> web.zoomIn());
+        // Zoom du TEXTE (lisibilité des sites « PC » sur une TV) : fiable même
+        // sur les sites qui interdisent le zoom de page, et mémorisé.
+        ((Button) findViewById(R.id.btnZoomOut)).setOnClickListener(v -> stepTextZoom(-1));
+        ((Button) findViewById(R.id.btnZoomIn)).setOnClickListener(v -> stepTextZoom(+1));
 
         btnCursor.setOnClickListener(v -> {
             cursorMode = !cursorMode;
@@ -664,7 +821,8 @@ public class MainActivity extends AppCompatActivity {
         url.setText(current == null ? "" : current);
         url.requestFocus();
         url.selectAll();
-        showKeyboard(url);
+        // Pas de clavier forcé : la barre sert souvent à cliquer Favoris/Popups/Vue.
+        // Le clavier s'ouvre quand on appuie OK sur le champ d'adresse.
     }
 
     private void hideBar() {
@@ -816,16 +974,14 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /** Pont JavaScript : la page d'accueil lit les favoris et peut en supprimer. */
+    /** Pont JavaScript : SEULE la page d'accueil interne peut lire les favoris.
+     *  (L'objet est injecté dans toutes les pages ; sans ce garde-fou, n'importe
+     *  quel site pourrait lire la liste de ce que tu regardes.) */
     private final class FavBridge {
         @JavascriptInterface
         public String list() {
+            if (!onHomePage) return "[]";
             return Favorites.toJson(getApplicationContext());
-        }
-
-        @JavascriptInterface
-        public void remove(final String favUrl) {
-            Favorites.remove(getApplicationContext(), favUrl);
         }
     }
 
@@ -850,6 +1006,7 @@ public class MainActivity extends AppCompatActivity {
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT));
         customView.bringToFront();
+        osd.bringToFront(); // l'indicateur (+10 s, pause…) reste visible par-dessus
         // On ne donne PAS le focus à la vue plein écran : sinon les touches
         // s'y perdent au lieu d'atteindre le lecteur (avance/recul cassé).
         enterImmersive();
@@ -860,6 +1017,8 @@ public class MainActivity extends AppCompatActivity {
         root.removeView(customView);
         customView = null;
         fullscreenWeb = null;
+        osd.removeCallbacks(osdHideRunnable);
+        osd.setVisibility(View.GONE);
         if (customViewCallback != null) {
             customViewCallback.onCustomViewHidden();
             customViewCallback = null;
@@ -894,15 +1053,48 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
-        int code = e.getKeyCode();
+        final int code = e.getKeyCode();
+        final boolean down = e.getAction() == KeyEvent.ACTION_DOWN;
+        final boolean up = e.getAction() == KeyEvent.ACTION_UP;
+        final boolean isCenter = code == KeyEvent.KEYCODE_DPAD_CENTER
+                || code == KeyEvent.KEYCODE_ENTER
+                || code == KeyEvent.KEYCODE_NUMPAD_ENTER
+                || code == KeyEvent.KEYCODE_BUTTON_A;
 
-        // En plein écran vidéo : Retour quitte le plein écran ; TOUTES les
-        // autres touches (◄ ► avance/recul, OK lecture/pause…) sont transmises
-        // à la WebView qui joue la vidéo, qui les remet au lecteur du site.
+        // Touches média physiques (Fire TV…) : si une vidéo est détectée, on la
+        // pilote directement, quel que soit l'écran.
+        if (videoAvailable()) {
+            if (code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || code == KeyEvent.KEYCODE_MEDIA_PLAY
+                    || code == KeyEvent.KEYCODE_MEDIA_PAUSE) {
+                if (up) togglePlayOsd();
+                return true;
+            }
+            if (code == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD) { if (down) seekOsd(30); return true; }
+            if (code == KeyEvent.KEYCODE_MEDIA_REWIND)       { if (down) seekOsd(-30); return true; }
+        }
+
+        // Plein écran vidéo. Si notre script a détecté une vidéo (même dans un
+        // lecteur d'un autre domaine) : ◄ ► = −/+10 s, OK = lecture/pause, avec
+        // indicateur à l'écran. Sinon, les touches vont au lecteur du site tel
+        // quel. Retour quitte toujours le plein écran.
         if (customView != null) {
             if (code == KeyEvent.KEYCODE_BACK) {
-                if (e.getAction() == KeyEvent.ACTION_UP) hideFullscreen();
+                if (up) hideFullscreen();
                 return true;
+            }
+            if (videoAvailable()) {
+                if (code == KeyEvent.KEYCODE_DPAD_LEFT) {
+                    if (down && e.getRepeatCount() % 3 == 0) seekOsd(-10);
+                    return true;
+                }
+                if (code == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                    if (down && e.getRepeatCount() % 3 == 0) seekOsd(10);
+                    return true;
+                }
+                if (isCenter) {
+                    if (up) togglePlayOsd();
+                    return true;
+                }
             }
             WebView target = fullscreenWeb != null ? fullscreenWeb : activeWeb();
             if (target != null && target.dispatchKeyEvent(e)) return true;
@@ -913,47 +1105,40 @@ public class MainActivity extends AppCompatActivity {
         // laisse la navigation D-pad native entre les éléments.
         if (favoritesVisible()) {
             if (code == KeyEvent.KEYCODE_BACK) {
-                if (e.getAction() == KeyEvent.ACTION_UP) hideFavorites();
+                if (up) hideFavorites();
                 return true;
             }
             if (code == KeyEvent.KEYCODE_MENU) return true;
             return super.dispatchKeyEvent(e);
         }
 
-        // Popup ouvert : Retour recule dans le popup puis le ferme (retour à la
-        // page d'origine) ; le curseur agit sur le popup.
+        // Popup ouvert : Retour recule dans le popup (en coupant le son) puis le
+        // ferme (retour à la page d'origine) ; le curseur agit sur le popup.
         if (popupVisible()) {
             if (code == KeyEvent.KEYCODE_BACK) {
-                if (customView != null) {
-                    if (e.getAction() == KeyEvent.ACTION_UP) hideFullscreen();
-                    return true;
-                }
-                if (e.getAction() == KeyEvent.ACTION_UP) {
-                    if (popupWeb != null && popupWeb.canGoBack()) popupWeb.goBack();
-                    else closePopup();
+                if (up) {
+                    if (popupWeb != null && popupWeb.canGoBack()) {
+                        pauseThen(popupWeb, () -> { if (popupWeb != null) popupWeb.goBack(); });
+                    } else {
+                        closePopup();
+                    }
                 }
                 return true;
             }
             if (code == KeyEvent.KEYCODE_MENU) return true;
-            if (cursorMode && customView == null) {
-                if (handleCursorKey(e)) return true;
-            }
+            if (cursorMode && handleCursorKey(e)) return true;
             return super.dispatchKeyEvent(e);
         }
 
-        // Touche MENU : afficher/cacher la barre d'adresse
+        // Touche MENU (Fire TV) : afficher/cacher la barre d'adresse
         if (code == KeyEvent.KEYCODE_MENU) {
-            if (e.getAction() == KeyEvent.ACTION_UP) toggleBar();
+            if (up) toggleBar();
             return true;
         }
 
         // Touche RETOUR
         if (code == KeyEvent.KEYCODE_BACK) {
-            if (customView != null) {
-                if (e.getAction() == KeyEvent.ACTION_UP) hideFullscreen();
-                return true;
-            }
-            if (e.getAction() == KeyEvent.ACTION_UP) handleBack();
+            if (up) handleBack();
             return true;
         }
 
@@ -962,10 +1147,26 @@ public class MainActivity extends AppCompatActivity {
             return super.dispatchKeyEvent(e);
         }
 
-        // Mode curseur : la croix directionnelle déplace le pointeur, OK clique
-        if (cursorMode && customView == null) {
-            if (handleCursorKey(e)) return true;
+        // Appui LONG sur OK = barre d'outils, QUEL QUE SOIT le mode curseur
+        // (sans ça, « Curseur: OFF » sur Google TV — pas de touche MENU —
+        // rendait la barre inaccessible pour de bon). Appui court : clic au
+        // curseur, ou appui transmis à la page si le curseur est désactivé.
+        if (isCenter) {
+            if (down) {
+                if (e.getRepeatCount() == 0) centerDownAt = e.getEventTime();
+                return cursorMode || super.dispatchKeyEvent(e);
+            }
+            if (up) {
+                long dur = e.getEventTime() - centerDownAt;
+                if (dur >= LONG_PRESS_MS) { toggleBar(); return true; }
+                if (cursorMode) { tapAtCursor(); return true; }
+                return super.dispatchKeyEvent(e);
+            }
+            return true;
         }
+
+        // Mode curseur : la croix directionnelle déplace le pointeur
+        if (cursorMode && handleCursorKey(e)) return true;
 
         return super.dispatchKeyEvent(e);
     }
@@ -976,8 +1177,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         if (web.canGoBack()) {
-            pauseMedia(web);
-            web.goBack();
+            pauseThen(web, () -> { if (web != null) web.goBack(); });
             return;
         }
         long now = SystemClock.uptimeMillis();
@@ -1002,20 +1202,9 @@ public class MainActivity extends AppCompatActivity {
                 || code == KeyEvent.KEYCODE_BUTTON_A;
 
         if (isCenter) {
-            // Dans un popup : OK = simple clic (pas de barre sur le popup).
-            if (popupVisible()) {
-                if (e.getAction() == KeyEvent.ACTION_UP) tapAtCursor();
-                return true;
-            }
-            // Appui COURT = clic ; appui LONG = ouvrir la barre (utile sur les
-            // télécommandes Google TV qui n'ont pas de touche MENU).
-            if (e.getAction() == KeyEvent.ACTION_DOWN) {
-                if (e.getRepeatCount() == 0) centerDownAt = e.getEventTime();
-            } else if (e.getAction() == KeyEvent.ACTION_UP) {
-                long dur = e.getEventTime() - centerDownAt;
-                if (dur >= LONG_PRESS_MS) toggleBar();
-                else tapAtCursor();
-            }
+            // OK = clic au curseur. (L'appui long -> barre est géré en amont,
+            // dans dispatchKeyEvent, indépendamment du mode curseur.)
+            if (e.getAction() == KeyEvent.ACTION_UP) tapAtCursor();
             return true;
         }
         if (isDir) {
@@ -1090,6 +1279,133 @@ public class MainActivity extends AppCompatActivity {
         up.recycle();
     }
 
+    // ------------------------------------------------------------- Contrôle vidéo
+    //
+    // Pourquoi un script dans CHAQUE frame : sur beaucoup de sites, le lecteur
+    // est une iframe d'un AUTRE domaine. Le JavaScript de la page principale
+    // n'a pas le droit d'y toucher (règle de même origine) — c'est pour ça que
+    // les tentatives précédentes échouaient. WebViewCompat.addDocumentStartJavaScript
+    // injecte notre script directement DANS chaque frame, origine comprise, et
+    // l'objet AndroidVideo (JavascriptInterface) y est disponible. Chaque frame :
+    //   - signale si elle a une <video> et si elle joue  (report)
+    //   - récupère nos commandes et les applique à SA vidéo (poll)
+    //   - se met en pause quand pauseGen change          (pauseGen)
+    // La commande va en priorité à la frame dont la vidéo JOUE ; sinon à la
+    // première qui a une vidéo. Une commande non consommée expire (800 ms).
+
+    private static final String VIDEO_SCRIPT =
+            "(function(){if(window.__wtvCtl)return;window.__wtvCtl=1;"
+            + "var A=window.AndroidVideo;if(!A)return;var lastGen=-1;"
+            + "function vids(){try{return Array.prototype.slice.call(document.querySelectorAll('video'));}catch(e){return[];}}"
+            + "function best(){var a=vids();if(!a.length)return null;"
+            + "for(var i=0;i<a.length;i++){if(!a[i].paused&&a[i].readyState>0)return a[i];}"
+            + "var b=a[0];for(var j=1;j<a.length;j++){if((a[j].clientWidth*a[j].clientHeight)>(b.clientWidth*b.clientHeight))b=a[j];}return b;}"
+            + "setInterval(function(){try{var v=best();"
+            + "var g=A.pauseGen();if(g!==lastGen){var first=(lastGen===-1);lastGen=g;if(v&&!first){try{v.pause();}catch(e){}}}"
+            + "if(!v){A.report(0,0);return;}A.report(1,v.paused?0:1);"
+            + "var c=A.poll(v.paused?0:1);if(!c)return;"
+            + "if(c.indexOf('seek:')===0){var d=parseFloat(c.substring(5))||0;"
+            + "var dur=isFinite(v.duration)?v.duration:1e9;v.currentTime=Math.max(0,Math.min(dur,v.currentTime+d));}"
+            + "else if(c==='toggle'){if(v.paused){var p=v.play();if(p&&p.catch)p.catch(function(){});}else{v.pause();}}"
+            + "}catch(e){}},120);})();";
+
+    /** Installe le script de contrôle dans toutes les frames de cette WebView. */
+    private void installVideoScript(WebView w) {
+        try {
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                WebViewCompat.addDocumentStartJavaScript(w, VIDEO_SCRIPT,
+                        Collections.singleton("*"));
+            }
+            // Sinon : secours via evaluateJavascript dans onPageFinished (frame principale).
+        } catch (Exception ignored) { }
+    }
+
+    /** Pont appelé par le script de chaque frame (threads JavaScript). */
+    private final class VideoBridge {
+        @JavascriptInterface
+        public void report(int has, int playing) {
+            if (has == 1) {
+                videoSeenAt = SystemClock.uptimeMillis();
+                videoPlaying = playing == 1;
+            }
+        }
+
+        @JavascriptInterface
+        public String poll(int playing) {
+            synchronized (videoLock) {
+                if (videoCmd == null) return "";
+                long age = SystemClock.uptimeMillis() - videoCmdAt;
+                if (age > 800) { videoCmd = null; return ""; }     // périmée
+                if (playing == 1 || age > 250) {                    // priorité à la vidéo qui joue
+                    String c = videoCmd;
+                    videoCmd = null;
+                    return c;
+                }
+                return "";
+            }
+        }
+
+        @JavascriptInterface
+        public int pauseGen() {
+            return pauseGen;
+        }
+    }
+
+    private boolean videoAvailable() {
+        return SystemClock.uptimeMillis() - videoSeenAt < 700;
+    }
+
+    private void issueVideoCmd(String cmd) {
+        synchronized (videoLock) {
+            videoCmd = cmd;
+            videoCmdAt = SystemClock.uptimeMillis();
+        }
+    }
+
+    private void seekOsd(int seconds) {
+        issueVideoCmd("seek:" + seconds);
+        showOsd((seconds > 0 ? "⏩  +" : "⏪  −") + Math.abs(seconds) + " s");
+    }
+
+    private void togglePlayOsd() {
+        boolean wasPlaying = videoPlaying;
+        issueVideoCmd("toggle");
+        showOsd(wasPlaying ? "⏸  Pause" : "▶  Lecture");
+    }
+
+    /** Indicateur à l'écran, disparaît tout seul. */
+    private void showOsd(String text) {
+        if (osd == null) return;
+        osd.setText(text);
+        osd.setVisibility(View.VISIBLE);
+        osd.bringToFront();
+        osd.removeCallbacks(osdHideRunnable);
+        osd.postDelayed(osdHideRunnable, 900);
+    }
+
+    // ------------------------------------------------------------- Divers UI
+
+    private void stepTextZoom(int dir) {
+        int idx = 1; // 100 %
+        for (int i = 0; i < TEXT_ZOOMS.length; i++) if (TEXT_ZOOMS[i] == textZoom) idx = i;
+        idx = Math.max(0, Math.min(TEXT_ZOOMS.length - 1, idx + dir));
+        textZoom = TEXT_ZOOMS[idx];
+        applyTextZoom();
+        saveSettings();
+        Toast.makeText(this, "Texte " + textZoom + " %", Toast.LENGTH_SHORT).show();
+    }
+
+    private void sslToast(String failingUrl) {
+        long now = SystemClock.uptimeMillis();
+        if (now - lastSslToast < 4000) return;
+        lastSslToast = now;
+        String host = null;
+        try { host = failingUrl != null ? Uri.parse(failingUrl).getHost() : null; } catch (Exception ignored) { }
+        Toast.makeText(this, "Certificat de sécurité invalide"
+                + (host != null ? " (" + host + ")" : "") + " — contenu bloqué",
+                Toast.LENGTH_LONG).show();
+    }
+
     // ------------------------------------------------------------- Clavier
 
     private void showKeyboard(View v) {
@@ -1117,6 +1433,15 @@ public class MainActivity extends AppCompatActivity {
         super.onResume();
         if (web != null) web.onResume();
         if (popupWeb != null) popupWeb.onResume();
+
+        // Retour des réglages après avoir autorisé l'installation : on reprend
+        // la mise à jour qui attendait.
+        if (pendingUpdate != null && (Build.VERSION.SDK_INT < Build.VERSION_CODES.O
+                || getPackageManager().canRequestPackageInstalls())) {
+            Updater.Release r = pendingUpdate;
+            pendingUpdate = null;
+            startUpdateDownload(r);
+        }
     }
 
     @Override

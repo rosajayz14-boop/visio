@@ -135,8 +135,8 @@
       a.className = 'tile';
       a.href = f.url;
       a.innerHTML =
-        '<img class="ico" alt="" src="https://www.google.com/s2/favicons?domain=' +
-          encodeURIComponent(h) + '&sz=64" onerror="this.style.visibility=\'hidden\'">' +
+        '<img class="ico" alt="" src="https://' + encodeURIComponent(h) +
+          '/favicon.ico" onerror="this.style.visibility=\'hidden\'">' +
         '<span class="txt"><span class="t">' + esc(f.title || h) + '</span>' +
         '<span class="u">' + esc(h) + '</span></span>';
       grid.appendChild(a);

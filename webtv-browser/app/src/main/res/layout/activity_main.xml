@@ -88,6 +88,23 @@
         </LinearLayout>
     </HorizontalScrollView>
 
+    <!-- Indicateur à l'écran en plein écran vidéo (+10 s, pause…), disparaît seul -->
+    <TextView
+        android:id="@+id/osd"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="56dp"
+        android:background="@drawable/osd_bg"
+        android:paddingLeft="22dp"
+        android:paddingRight="22dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="10dp"
+        android:textColor="#FFFFFFFF"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
     <!-- Panneau des favoris (superposé, navigable à la télécommande) -->
     <LinearLayout
         android:id="@+id/favOverlay"

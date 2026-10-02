@@ -9,23 +9,41 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Garde-fou : sur un tag, il doit être égal à "v" + versionName de l'app.
+      # Sinon l'auto-updateur de l'app verrait une version "plus récente" qui
+      # n'en est pas une et la proposerait en boucle.
+      - name: Vérifier que le tag correspond à versionName
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          V=$(grep -oP 'versionName\s+"\K[^"]+' webtv-browser/app/build.gradle)
+          T="${GITHUB_REF_NAME#v}"
+          if [ "$V" != "$T" ]; then
+            echo "::error::Le tag v$T ne correspond pas à versionName \"$V\" (webtv-browser/app/build.gradle). Mets à jour versionName ou retague."
+            exit 1
+          fi
+          echo "Tag v$T == versionName $V : OK"
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+          cache: gradle
+
       - name: Compiler l'APK
         working-directory: webtv-browser
         run: |
           chmod +x ./gradlew
           ./gradlew assembleDebug --no-daemon --stacktrace
+
       - uses: actions/upload-artifact@v4
         with:
           name: WebTV-debug-apk
           path: webtv-browser/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
-      # Sur un tag (ex: v1.0), publie une Release publique avec l'APK.
-      # L'URL de l'APK est alors utilisable dans l'app "Downloader" (Fire TV / Google TV).
+      # Sur un tag (ex: v3.3), publie une Release publique avec l'APK.
+      # L'URL de l'APK est utilisable dans "Downloader" et par l'auto-updateur.
       - name: Publier une Release (sur tag)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2

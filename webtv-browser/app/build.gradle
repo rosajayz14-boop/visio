@@ -10,18 +10,34 @@ android {
         applicationId "com.jason.webtv"
         minSdk 21          // couvre les vieux Fire Stick (Fire OS 5 / Android 5.1)
         targetSdk 34
-        versionCode 14
-        versionName "3.2"
+        versionCode 15
+        versionName "3.3"
+    }
+
+    // Keystore de debug FIXE et versionné (app/debug.keystore).
+    // Sans lui, chaque build CI générait une clé aléatoire : Android refusait
+    // alors d'installer une version par-dessus la précédente (signature
+    // différente) et il fallait désinstaller -> perte des favoris/réglages.
+    // Mot de passe standard du debug Android ; ce n'est pas un secret.
+    signingConfigs {
+        debug {
+            storeFile file('debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
     }
 
     buildTypes {
         debug {
-            // APK debug : signé automatiquement avec la clé debug -> installable direct
-            applicationIdSuffix ""
+            // APK debug : signé avec la clé fixe ci-dessus -> installable et
+            // mettable à jour directement, sans désinstaller.
+            signingConfig signingConfigs.debug
         }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.debug
         }
     }
 
@@ -36,4 +52,8 @@ dependencies {
     // pour éviter l'erreur "Duplicate class kotlin.*" tirée par androidx.appcompat.
     implementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.22')
     implementation 'androidx.appcompat:appcompat:1.7.0'
+    // WebViewCompat.addDocumentStartJavaScript : injecte notre script de
+    // contrôle vidéo dans TOUTES les frames, y compris les lecteurs d'un
+    // autre domaine (indispensable pour avance/recul/pause universels).
+    implementation 'androidx.webkit:webkit:1.12.1'
 }

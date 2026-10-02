@@ -14,6 +14,7 @@ import android.os.Message;
 import android.os.SystemClock;
 import android.provider.Settings;
 import android.text.TextUtils;
+import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
@@ -41,6 +42,9 @@ import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.FileProvider;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
 
@@ -1002,9 +1006,13 @@ public class MainActivity extends AppCompatActivity {
         web.setVisibility(View.GONE);
         if (popupContainer != null) popupContainer.setVisibility(View.GONE);
         customView.setBackgroundColor(Color.BLACK);
+        // Gravity.CENTER est indispensable : le lecteur dimensionne la surface
+        // vidéo à son ratio et compte sur le parent pour la centrer. Sans ça,
+        // elle se colle en haut à gauche avec une bande noire de l'autre côté.
         root.addView(customView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT));
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER));
         customView.bringToFront();
         osd.bringToFront(); // l'indicateur (+10 s, pause…) reste visible par-dessus
         // On ne donne PAS le focus à la vue plein écran : sinon les touches
@@ -1035,18 +1043,27 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    // Mode immersif via l'API moderne (WindowInsetsController) : fiable sur
+    // Android 11+ (Google TV Streamer = Android 14), là où les anciens drapeaux
+    // setSystemUiVisibility pouvaient laisser un décalage / une bande.
     private void enterImmersive() {
-        getWindow().getDecorView().setSystemUiVisibility(
-                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                        | View.SYSTEM_UI_FLAG_FULLSCREEN
-                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+        try {
+            WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+            WindowInsetsControllerCompat c = WindowCompat.getInsetsController(
+                    getWindow(), getWindow().getDecorView());
+            c.setSystemBarsBehavior(
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            c.hide(WindowInsetsCompat.Type.systemBars());
+        } catch (Exception ignored) { }
     }
 
     private void exitImmersive() {
-        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
+        try {
+            WindowInsetsControllerCompat c = WindowCompat.getInsetsController(
+                    getWindow(), getWindow().getDecorView());
+            c.show(WindowInsetsCompat.Type.systemBars());
+            WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
+        } catch (Exception ignored) { }
     }
 
     // ------------------------------------------------------------- Télécommande
